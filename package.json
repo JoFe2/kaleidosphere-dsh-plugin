@@ -1,0 +1,54 @@
+{
+  "name": "kaleidosphere-dsh-plugin",
+  "version": "0.1.0-preview.1",
+  "description": "Native KaleidoSphere database-analysis tools for DeepSeek Harness",
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./runtime": "./lib/runtime.mjs"
+  },
+  "files": [
+    "index.js",
+    "lib",
+    "vendor",
+    "cordis.patch.yml",
+    "README.md",
+    "LICENSE",
+    "NOTICE",
+    "VENDORED_MANIFEST.json",
+    "THIRD_PARTY_MANIFEST.json",
+    "third_party",
+    "examples"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/dsh-tools": "0.1.0-rc.8"
+  },
+  "dependencies": {
+    "mssql": "12.7.0"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "test:dsh": "bash scripts/test-dsh-rc8.sh",
+    "verify:package": "node scripts/verify-vendor.mjs && node scripts/verify-third-party.mjs && node scripts/verify-package.mjs"
+  },
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/JoFe2/kaleidosphere-dsh-plugin.git"
+  },
+  "keywords": [
+    "dsh-plugin",
+    "kaleidosphere",
+    "database-analysis",
+    "ai-agents"
+  ]
+}

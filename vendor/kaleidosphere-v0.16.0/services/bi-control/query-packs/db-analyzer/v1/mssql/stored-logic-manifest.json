@@ -1,0 +1,48 @@
+{
+  "schemaVersion": "chimpmaera.db/query-manifest/v1",
+  "packId": "chimpmaera.db.stored-logic.mssql",
+  "packVersion": "1.0.0",
+  "engine": "mssql",
+  "queries": [
+    {
+      "id": "mssql.stored-logic.objects",
+      "category": "stored-objects",
+      "file": "stored-logic-objects.sql",
+      "outputColumns": ["schema_name", "object_name", "object_kind", "native_object_id", "parent_schema_name", "parent_object_name", "enablement_state", "definition_visibility", "definition_component_ordinal", "definition_component_hash", "definition_component_hash_algorithm"],
+      "sortKeys": ["schema_name", "object_name", "object_kind", "definition_component_ordinal"],
+      "scopeColumn": "schema_name",
+      "readOnly": true,
+      "cost": "BOUNDED",
+      "timeoutMs": 5000,
+      "privilege": {"minimum": "CONNECT plus metadata visibility and VIEW DEFINITION for scoped stored objects"},
+      "fallback": {"onDenied": "Record DENIED or PARTIAL; never infer an empty stored-object inventory or a visible definition"},
+      "provenance": {
+        "sourceType": "OFFICIAL_CATALOG_API_REFERENCE",
+        "url": "https://learn.microsoft.com/en-us/sql/relational-databases/system-catalog-views/sys-sql-modules-transact-sql",
+        "spdx": "Apache-2.0",
+        "copiedCode": false,
+        "changeMarker": "CM-authored bounded SELECT over documented sys catalog views; no third-party query code copied"
+      }
+    },
+    {
+      "id": "mssql.stored-logic.native-dependencies",
+      "category": "stored-dependencies",
+      "file": "stored-logic-native-dependencies.sql",
+      "outputColumns": ["source_schema_name", "source_object_name", "source_object_kind", "target_schema_name", "target_object_name", "target_object_kind", "target_column_name", "column_resolution_state", "target_database_name", "target_server_or_link_name", "resolution_state", "native_dependency_kind", "is_schema_bound", "is_caller_dependent"],
+      "sortKeys": ["source_schema_name", "source_object_name", "source_object_kind", "target_server_or_link_name", "target_database_name", "target_schema_name", "target_object_name", "target_column_name", "native_dependency_kind"],
+      "scopeColumn": "source_schema_name",
+      "readOnly": true,
+      "cost": "BOUNDED",
+      "timeoutMs": 5000,
+      "privilege": {"minimum": "CONNECT plus metadata visibility and VIEW DEFINITION for scoped sys.sql_expression_dependencies rows"},
+      "fallback": {"onDenied": "Record DENIED or PARTIAL; preserve unresolved or external native references as explicit gaps"},
+      "provenance": {
+        "sourceType": "OFFICIAL_CATALOG_API_REFERENCE",
+        "url": "https://learn.microsoft.com/en-us/sql/relational-databases/system-catalog-views/sys-sql-expression-dependencies-transact-sql",
+        "spdx": "Apache-2.0",
+        "copiedCode": false,
+        "changeMarker": "CM-authored bounded SELECT over documented sys catalog views; no third-party query code copied"
+      }
+    }
+  ]
+}

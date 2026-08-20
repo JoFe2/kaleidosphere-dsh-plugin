@@ -1,0 +1,22 @@
+KaleidoSphere for DeepSeek Harness
+Copyright 2026 JoFe2 contributors
+
+This product vendors an exact runtime subset from KaleidoSphere v0.16.0,
+commit 5a73ff8146afa0067d226cffa639efde959e8fde, under Apache License 2.0.
+The subset is stored below vendor/kaleidosphere-v0.16.0 and retains its source
+layout so version, contract, analysis-core and provenance relationships remain
+auditable.
+
+Oracle node-oracledb 7.0.1 is distributed inside this package for the
+supported Oracle Thin-mode runtime path. Copyright (c) 2015, 2026, Oracle
+and/or its affiliates. It is dual-licensed under Apache License 2.0 or the
+Universal Permissive License 1.0; this distribution elects Apache License 2.0.
+Its original LICENSE, NOTICE and third-party license files remain below
+third_party/oracledb-7.0.1. The exact packaged files are integrity-pinned in
+THIRD_PARTY_MANIFEST.json.
+
+DeepSeek Harness is not vendored. Compatibility and tests target
+deepseek-ai/deepseek-harness dsh-v0.1.0-rc.8 at commit
+141eb6fef83422698aef7a981029e843e8161534, distributed under the MIT License.
+KaleidoSphere and this plugin are independent of and are not endorsed by
+DeepSeek or the DeepSeek Harness maintainers.

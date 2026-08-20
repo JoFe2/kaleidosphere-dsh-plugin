@@ -1,0 +1,22 @@
+- id: kaleidosphere-dsh-plugin
+  config:
+    source:
+      mode: live
+      profile:
+        schemaVersion: chimpmaera.db/analyze-profile/v1
+        profileId: company-readonly-oracle
+        engine: oracle
+        mode: RUNTIME
+        queryPack: {version: v1}
+        scope: {database: FREE, container: FREEPDB1, schemas: [BI_DEMO]}
+        policy: {access: READ_ONLY, allowRowSamples: false, maxQueryTimeoutMs: 10000}
+        adapter:
+          kind: oracle
+          host: oracle.example.internal
+          port: 1521
+          user: BI_ANALYZE
+          passwordEnv: KS_ORACLE_PASSWORD
+          protocol: tcp
+          serviceName: FREEPDB1
+          serverDn: null
+          connectTimeoutMs: 10000

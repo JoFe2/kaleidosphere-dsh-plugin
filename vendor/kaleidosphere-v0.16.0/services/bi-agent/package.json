@@ -1,0 +1,7 @@
+{
+  "name": "@chimpmaera-bi/agent",
+  "version": "0.16.0",
+  "private": true,
+  "type": "module",
+  "engines": {"node": ">=24 <25"}
+}

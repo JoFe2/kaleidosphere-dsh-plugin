@@ -1,0 +1,188 @@
+{
+  "schemaVersion": "chimpmaera.db/query-manifest/v1",
+  "packId": "chimpmaera.db.structure-map.mssql",
+  "packVersion": "1.0.0",
+  "engine": "mssql",
+  "queries": [
+    {
+      "id": "mssql.preflight.identity",
+      "category": "preflight",
+      "file": "preflight-identity.sql",
+      "outputColumns": ["engine", "engine_version", "engine_edition", "database_name", "container_name", "compatibility_level"],
+      "sortKeys": ["database_name"],
+      "scopeColumn": null,
+      "readOnly": true,
+      "cost": "LOW",
+      "timeoutMs": 5000,
+      "privilege": {"minimum": "CONNECT plus metadata visibility for the current database"},
+      "fallback": {"onDenied": "Record DENIED; do not infer engine, scope, version or an empty catalog"},
+      "provenance": {
+        "sourceType": "OFFICIAL_CATALOG_API_REFERENCE",
+        "url": "https://learn.microsoft.com/en-us/sql/relational-databases/system-catalog-views/sys-databases-transact-sql",
+        "spdx": "Apache-2.0",
+        "copiedCode": false,
+        "changeMarker": "CM-authored bounded SELECT; no third-party query code copied"
+      }
+    },
+    {
+      "id": "mssql.preflight.rights",
+      "category": "preflight",
+      "file": "preflight-rights.sql",
+      "outputColumns": ["permission_name", "has_permission"],
+      "sortKeys": ["permission_name"],
+      "scopeColumn": null,
+      "readOnly": true,
+      "cost": "LOW",
+      "timeoutMs": 5000,
+      "privilege": {"minimum": "CONNECT"},
+      "fallback": {"onDenied": "Record DENIED and mark all dependent structural categories not attempted"},
+      "provenance": {
+        "sourceType": "OFFICIAL_FUNCTION_API_REFERENCE",
+        "url": "https://learn.microsoft.com/en-us/sql/t-sql/functions/has-perms-by-name-transact-sql",
+        "spdx": "Apache-2.0",
+        "copiedCode": false,
+        "changeMarker": "CM-authored bounded SELECT; no third-party query code copied"
+      }
+    },
+    {
+      "id": "mssql.structure.schemas",
+      "category": "schemas",
+      "file": "structure-schemas.sql",
+      "outputColumns": ["schema_name", "schema_id", "owner_name"],
+      "sortKeys": ["schema_name"],
+      "scopeColumn": "schema_name",
+      "readOnly": true,
+      "cost": "LOW",
+      "timeoutMs": 5000,
+      "privilege": {"minimum": "CONNECT plus metadata visibility for scoped schemas"},
+      "fallback": {"onDenied": "Record DENIED; do not infer absent schemas from an empty or hidden catalog"},
+      "provenance": {
+        "sourceType": "OFFICIAL_CATALOG_API_REFERENCE",
+        "url": "https://learn.microsoft.com/en-us/sql/relational-databases/system-catalog-views/schemas-catalog-views-sys-schemas",
+        "spdx": "Apache-2.0",
+        "copiedCode": false,
+        "changeMarker": "CM-authored bounded SELECT; no third-party query code copied"
+      }
+    },
+    {
+      "id": "mssql.structure.relations",
+      "category": "relations",
+      "file": "structure-relations.sql",
+      "outputColumns": ["schema_name", "relation_name", "relation_kind", "object_id", "created_at", "modified_at", "is_ms_shipped"],
+      "sortKeys": ["schema_name", "relation_name", "relation_kind"],
+      "scopeColumn": "schema_name",
+      "readOnly": true,
+      "cost": "BOUNDED",
+      "timeoutMs": 5000,
+      "privilege": {"minimum": "CONNECT plus metadata visibility for scoped schemas"},
+      "fallback": {"onDenied": "Record DENIED; preserve unknown coverage instead of emitting an empty relation inventory"},
+      "provenance": {
+        "sourceType": "OFFICIAL_CATALOG_API_REFERENCE",
+        "url": "https://learn.microsoft.com/en-us/sql/relational-databases/system-catalog-views/sys-objects-transact-sql",
+        "spdx": "Apache-2.0",
+        "copiedCode": false,
+        "changeMarker": "CM-authored bounded SELECT; no third-party query code copied"
+      }
+    },
+    {
+      "id": "mssql.structure.columns",
+      "category": "columns",
+      "file": "structure-columns.sql",
+      "outputColumns": ["schema_name", "relation_name", "relation_kind", "column_name", "ordinal_position", "data_type_schema", "data_type", "max_length", "numeric_precision", "numeric_scale", "is_nullable", "default_expression", "generation_kind", "generation_expression", "is_identity", "identity_seed", "identity_increment", "identity_generation", "identity_options"],
+      "sortKeys": ["schema_name", "relation_name", "ordinal_position", "column_name"],
+      "scopeColumn": "schema_name",
+      "readOnly": true,
+      "cost": "BOUNDED",
+      "timeoutMs": 5000,
+      "privilege": {"minimum": "CONNECT plus metadata visibility for scoped tables and views"},
+      "fallback": {"onDenied": "Record DENIED; do not invent column definitions or generated-column behavior from relation names"},
+      "provenance": {
+        "sourceType": "OFFICIAL_CATALOG_API_REFERENCE",
+        "url": "https://learn.microsoft.com/en-us/sql/relational-databases/system-catalog-views/sys-columns-transact-sql",
+        "spdx": "Apache-2.0",
+        "copiedCode": false,
+        "changeMarker": "CM-authored bounded SELECT; no third-party query code copied"
+      }
+    },
+    {
+      "id": "mssql.structure.constraints",
+      "category": "constraints",
+      "file": "structure-constraints.sql",
+      "outputColumns": ["schema_name", "relation_name", "constraint_name", "constraint_kind", "column_name", "ordinal_position", "referenced_schema_name", "referenced_relation_name", "referenced_column_name", "check_expression", "delete_rule", "update_rule", "is_enabled", "is_validated", "is_deferrable", "is_initially_deferred"],
+      "sortKeys": ["schema_name", "relation_name", "constraint_kind", "constraint_name", "ordinal_position", "column_name"],
+      "scopeColumn": "schema_name",
+      "readOnly": true,
+      "cost": "BOUNDED",
+      "timeoutMs": 5000,
+      "privilege": {"minimum": "CONNECT plus metadata visibility for scoped table constraints and indexes"},
+      "fallback": {"onDenied": "Record DENIED; do not infer keys, relationships or validation state from names or empty catalogs"},
+      "provenance": {
+        "sourceType": "OFFICIAL_CATALOG_API_REFERENCE",
+        "url": "https://learn.microsoft.com/en-us/sql/relational-databases/system-catalog-views/object-catalog-views-transact-sql",
+        "spdx": "Apache-2.0",
+        "copiedCode": false,
+        "changeMarker": "CM-authored bounded SELECT over documented sys catalog views; no third-party query code copied"
+      }
+    },
+    {
+      "id": "mssql.structure.indexes",
+      "category": "indexes",
+      "file": "structure-indexes.sql",
+      "outputColumns": ["schema_name", "relation_name", "index_name", "index_kind", "column_name", "ordinal_position", "column_expression", "is_included", "is_partition_key", "partition_ordinal", "is_unique", "is_primary_key", "is_unique_constraint", "is_enabled", "filter_expression", "data_space_name", "partitioning_kind", "partition_count"],
+      "sortKeys": ["schema_name", "relation_name", "index_name", "ordinal_position", "column_name"],
+      "scopeColumn": "schema_name",
+      "readOnly": true,
+      "cost": "BOUNDED",
+      "timeoutMs": 5000,
+      "privilege": {"minimum": "CONNECT plus metadata visibility for scoped table indexes and partitions"},
+      "fallback": {"onDenied": "Record DENIED; do not infer index, uniqueness or partition layout from constraints, names or empty catalogs"},
+      "provenance": {
+        "sourceType": "OFFICIAL_CATALOG_API_REFERENCE",
+        "url": "https://learn.microsoft.com/en-us/sql/relational-databases/system-catalog-views/sys-indexes-transact-sql",
+        "spdx": "Apache-2.0",
+        "copiedCode": false,
+        "changeMarker": "CM-authored bounded SELECT over documented sys catalog views; no third-party query code copied"
+      }
+    },
+    {
+      "id": "mssql.structure.sequences",
+      "category": "sequences",
+      "file": "structure-sequences.sql",
+      "outputColumns": ["schema_name", "sequence_name", "data_type", "numeric_precision", "numeric_scale", "start_value", "increment_by", "min_value", "max_value", "is_cycling", "cache_size", "observed_value", "observed_value_semantics"],
+      "sortKeys": ["schema_name", "sequence_name"],
+      "scopeColumn": "schema_name",
+      "readOnly": true,
+      "cost": "LOW",
+      "timeoutMs": 5000,
+      "privilege": {"minimum": "CONNECT plus metadata visibility for scoped sequences"},
+      "fallback": {"onDenied": "Record DENIED; do not infer sequence bounds, allocation state or absence from names or empty catalogs"},
+      "provenance": {
+        "sourceType": "OFFICIAL_CATALOG_API_REFERENCE",
+        "url": "https://learn.microsoft.com/en-us/sql/relational-databases/system-catalog-views/sys-sequences-transact-sql",
+        "spdx": "Apache-2.0",
+        "copiedCode": false,
+        "changeMarker": "CM-authored bounded SELECT over documented sys catalog views; no third-party query code copied"
+      }
+    },
+    {
+      "id": "mssql.structure.synonyms",
+      "category": "synonyms",
+      "file": "structure-synonyms.sql",
+      "outputColumns": ["schema_name", "synonym_name", "target_reference", "target_catalog_name", "target_schema_name", "target_object_name", "remote_locator"],
+      "sortKeys": ["schema_name", "synonym_name"],
+      "scopeColumn": "schema_name",
+      "readOnly": true,
+      "cost": "LOW",
+      "timeoutMs": 5000,
+      "privilege": {"minimum": "CONNECT plus metadata visibility for scoped synonyms"},
+      "fallback": {"onDenied": "Record DENIED; preserve the opaque target reference and do not invent or resolve inaccessible targets"},
+      "provenance": {
+        "sourceType": "OFFICIAL_CATALOG_API_REFERENCE",
+        "url": "https://learn.microsoft.com/en-us/sql/relational-databases/system-catalog-views/sys-synonyms-transact-sql",
+        "spdx": "Apache-2.0",
+        "copiedCode": false,
+        "changeMarker": "CM-authored bounded SELECT over documented sys catalog views; no third-party query code copied"
+      }
+    }
+  ]
+}

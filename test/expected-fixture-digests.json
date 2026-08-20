@@ -1,0 +1,26 @@
+{
+  "status": {
+    "response": "sha256:8bb3d486ce9b03b21d2fa522db34316222cc103f934245aafc726b023ba40732",
+    "evidence": "sha256:961deb5782fed644a4f4b0f630a6776d29358793b341000382231ecd4ed4339d"
+  },
+  "analyze": {
+    "response": "sha256:7f42d9788aaac555ee311d7ce9cc0fb9bc230888f064de5d0db4d660ed77fd36",
+    "evidence": "sha256:7d2768b6a7908cfaa7aed67ced05bfea2ca2dc57980b2e72ef775dac30811605"
+  },
+  "discovery": {
+    "response": "sha256:fc3143427231004ea935369a94d013b61a70fb5915ed170c2b0dbdb3b6f41bae",
+    "evidence": "sha256:2bfeedb06465eeebb381087a7d44bb08ea0e254ac0260446494b3d3d31d52ce6"
+  },
+  "plan": {
+    "response": "sha256:1a057cdf219a5ac6c74aadeed975e344c36db46bf6c1d81976ecb90b9dec008a",
+    "evidence": "sha256:3c52d68d3444f23175bcfcf77bfa490f59f8c46bf1b971383cdd3e6a2e7abdbb"
+  },
+  "preview": {
+    "response": "sha256:303bc0b2e992ba008c7a264e496058fd858ca0fe709d267249b062d82c23e179",
+    "evidence": "sha256:733bd561351fdeb44ac8ff8e00668c1c696d1c51d6120df08329634d03df2772"
+  },
+  "readback": {
+    "response": "sha256:819d8edeb6c2165abcb3b16c52e98f481451db469046d94eee7f6babfd861672",
+    "evidence": "sha256:7835d6108fd52e5b658410c0d41c6408fa4ecb28929ad11e9106acdde86445aa"
+  }
+}
