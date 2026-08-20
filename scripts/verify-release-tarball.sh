@@ -87,6 +87,23 @@ if [[ "${VERIFY_RELEASE_SKIP_DSH:-0}" != 1 ]]; then
   PLUGIN_SPEC="$asset_file" bash "$repo_root/scripts/test-dsh-rc8.sh"
 fi
 
+if [[ -n "${EVIDENCE_DIR:-}" ]]; then
+  mkdir -p "$EVIDENCE_DIR"
+  printf '%s  %s\n' "$observed_hash" "$asset_name" >"$EVIDENCE_DIR/release-asset.sha256"
+  node - <<'NODE' "$EVIDENCE_DIR/release-verification.json" "$asset_name" "$observed_hash" "${VERIFY_RELEASE_SKIP_DSH:-0}"
+const fs = require('node:fs')
+const [output, asset, sha256, skipped] = process.argv.slice(2)
+const report = {
+  schemaVersion: 'kaleidosphere.dsh/release-verification/v1',
+  asset,
+  sha256,
+  packageContract: 'PASS',
+  dshRc8Lifecycle: skipped === '1' ? 'SKIPPED' : 'PASS',
+}
+fs.writeFileSync(output, `${JSON.stringify(report, null, 2)}\n`)
+NODE
+fi
+
 echo "RELEASE_ASSET_SHA256=$observed_hash"
 echo "RELEASE_PACKAGE_CONTRACT=PASS"
 if [[ "${VERIFY_RELEASE_SKIP_DSH:-0}" == 1 ]]; then
