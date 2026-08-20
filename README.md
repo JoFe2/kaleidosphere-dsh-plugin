@@ -4,6 +4,9 @@ Native database analysis inside DeepSeek Harness — one plugin install, no sepa
 
 > Preview compatibility: DeepSeek Harness `dsh-v0.1.0-rc.8` / `@deepseek-ai/dsh@0.1.0-rc.8` at `141eb6fef83422698aef7a981029e843e8161534`. DSH is a Developer Preview and breaking updates may require a plugin release.
 
+See the [evidence-backed compatibility matrix](COMPATIBILITY.md) for the exact
+host, Node.js, operating-system, and database support boundaries.
+
 ## Install and try the fixture
 
 Install DSH and pnpm, then add the immutable plugin release to a profile:
@@ -68,7 +71,14 @@ This repository ships prebuilt ESM; GitHub installation needs no `prepare` scrip
 
 This Preview proves the deterministic fixture and exact rc.8 load/tool/unload/remove/reinstall lifecycle. It does not claim DSH stable ABI, host-wide DSH security, malicious third-party plugin containment, production readiness, live customer-database evidence, universal database support, Superset mutation, or upstream DeepSeek endorsement.
 
+Report suspected vulnerabilities through the private path described in the
+[security policy](SECURITY.md); never post credentials or exploit details in a
+public issue.
+
 ## Development
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for DCO, protected-PR, compatibility,
+provenance, and evidence requirements.
 
 ```sh
 npm test
@@ -77,3 +87,7 @@ npm run test:dsh
 ```
 
 The exact DSH smoke installs a packed tarball into a fresh profile, checks the bundle layer and ACTIVE tool row, executes all six tools through `ctx.tools.execute`, exercises HMR unload/reload, removes/reinstalls the package, and proves scoped temporary cleanup.
+
+`npm run verify:release -- <release.tgz> <release.tgz.sha256>` additionally
+checks an immutable local or GitHub-hosted release asset and its sidecar before
+running that same exact-host lifecycle against the downloaded bytes.
