@@ -35,8 +35,8 @@ plugin_spec="${PLUGIN_SPEC:-$package_file}"
 dsh plugin --profile "$profile_name" add "$plugin_spec" >"$evidence_dir/add.log" 2>&1
 dsh plugin --profile "$profile_name" add "$repo_root/test/dsh-probe-bundle" >"$evidence_dir/add-probe.log" 2>&1
 dsh --profile "$profile_name" --dump-config >"$evidence_dir/dump-config-installed.txt"
-rg -q '# == kaleidosphere-dsh-plugin' "$evidence_dir/dump-config-installed.txt"
-rg -q 'id: kaleidosphere-dsh-plugin' "$evidence_dir/dump-config-installed.txt"
+grep -Fq '# == kaleidosphere-dsh-plugin' "$evidence_dir/dump-config-installed.txt"
+grep -Fq 'id: kaleidosphere-dsh-plugin' "$evidence_dir/dump-config-installed.txt"
 
 export KS_PROBE_ACTIVE="$evidence_dir/active.json"
 export KS_PROBE_UNLOAD_REQUEST="$evidence_dir/request-unload"
@@ -94,12 +94,12 @@ unset dsh_pid
 
 dsh plugin --profile "$profile_name" remove kaleidosphere-dsh-plugin >"$evidence_dir/remove.log" 2>&1
 dsh --profile "$profile_name" --dump-config >"$evidence_dir/dump-config-removed.txt"
-! rg -q '# == kaleidosphere-dsh-plugin|id: kaleidosphere-dsh-plugin' "$evidence_dir/dump-config-removed.txt"
+! grep -Eq '# == kaleidosphere-dsh-plugin|id: kaleidosphere-dsh-plugin' "$evidence_dir/dump-config-removed.txt"
 node -e 'const p=require(process.argv[1]); if(p.dependencies?.["kaleidosphere-dsh-plugin"]||p.dsh.profile.bundles.includes("kaleidosphere-dsh-plugin")) process.exit(1)' "$profile_dir/package.json"
 
 dsh plugin --profile "$profile_name" add "$plugin_spec" >"$evidence_dir/reinstall.log" 2>&1
 dsh --profile "$profile_name" --dump-config >"$evidence_dir/dump-config-reinstalled.txt"
-rg -q '# == kaleidosphere-dsh-plugin' "$evidence_dir/dump-config-reinstalled.txt"
+grep -Fq '# == kaleidosphere-dsh-plugin' "$evidence_dir/dump-config-reinstalled.txt"
 
 export KS_PROBE_ACTIVE="$evidence_dir/active-reinstall.json"
 export KS_PROBE_DISPOSED="$evidence_dir/disposed-reinstall.txt"
@@ -123,7 +123,7 @@ if dsh --profile "$invalid_profile" >"$evidence_dir/invalid-config.log" 2>&1; th
   echo 'invalid configuration unexpectedly loaded' >&2
   exit 1
 fi
-rg -q 'KS_DSH_SOURCE_MODE_INVALID' "$evidence_dir/invalid-config.log"
+grep -Fq 'KS_DSH_SOURCE_MODE_INVALID' "$evidence_dir/invalid-config.log"
 dsh plugin --profile "$invalid_profile" remove kaleidosphere-dsh-plugin >"$evidence_dir/remove-invalid.log" 2>&1
 node -e 'const p=require(process.argv[1]); if(Object.keys(p.dependencies||{}).length||p.dsh.profile.bundles.some(x=>/kaleidosphere/.test(x))) process.exit(1)' "$invalid_profile_dir/package.json"
 
