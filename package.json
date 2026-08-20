@@ -14,6 +14,7 @@
     "vendor",
     "cordis.patch.yml",
     "README.md",
+    "CHANGELOG.md",
     "LICENSE",
     "NOTICE",
     "VENDORED_MANIFEST.json",
