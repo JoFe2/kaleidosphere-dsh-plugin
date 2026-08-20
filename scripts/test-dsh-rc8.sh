@@ -8,12 +8,18 @@ bin_root="$run_root/bin"
 dsh_home="$run_root/home"
 runtime_tmp="$run_root/runtime-tmp"
 evidence_dir="${EVIDENCE_DIR:-$run_root/evidence}"
+advanced_features="${DSH_EXPECT_ADVANCED_FEATURES:-1}"
 profile_name=ks-e2e
 profile_dir="$dsh_home/profiles/$profile_name"
 mkdir -p "$bin_root" "$dsh_home" "$runtime_tmp" "$evidence_dir"
+[[ "$advanced_features" = 0 || "$advanced_features" = 1 ]]
 
 cleanup() {
   if [[ -n "${dsh_pid:-}" ]] && kill -0 "$dsh_pid" 2>/dev/null; then kill -KILL "$dsh_pid" 2>/dev/null || true; fi
+  if [[ -n "${external_pid:-}" ]] && kill -0 "$external_pid" 2>/dev/null; then
+    kill -TERM "$external_pid" 2>/dev/null || true
+    wait "$external_pid" 2>/dev/null || true
+  fi
   if [[ "${KEEP_DSH_SMOKE:-0}" != 1 ]]; then rm -rf "$run_root"; fi
 }
 trap cleanup EXIT
@@ -127,11 +133,85 @@ grep -Fq 'KS_DSH_SOURCE_MODE_INVALID' "$evidence_dir/invalid-config.log"
 dsh plugin --profile "$invalid_profile" remove kaleidosphere-dsh-plugin >"$evidence_dir/remove-invalid.log" 2>&1
 node -e 'const p=require(process.argv[1]); if(Object.keys(p.dependencies||{}).length||p.dsh.profile.bundles.some(x=>/kaleidosphere/.test(x))) process.exit(1)' "$invalid_profile_dir/package.json"
 
+if [[ "$advanced_features" = 1 ]]; then
+toggled_profile=ks-toggled
+toggled_profile_dir="$dsh_home/profiles/$toggled_profile"
+dsh plugin --profile "$toggled_profile" add "$plugin_spec" >"$evidence_dir/add-toggled.log" 2>&1
+dsh plugin --profile "$toggled_profile" add "$repo_root/test/dsh-probe-bundle" >"$evidence_dir/add-toggled-probe.log" 2>&1
+printf '%s\n' \
+  '- id: kaleidosphere-dsh-plugin' \
+  '  config:' \
+  '    source:' \
+  '      mode: fixture' \
+  '    expose:' \
+  '      preview: false' \
+  >"$toggled_profile_dir/cordis.patch.yml"
+export KS_PROBE_ACTIVE="$evidence_dir/active-toggled.json"
+export KS_PROBE_DISPOSED="$evidence_dir/disposed-toggled.txt"
+export KS_PROBE_MODE=inventory
+export KS_PROBE_EXPECTED_TOOL_NAMES='kaleidosphere_status,kaleidosphere_discovery,kaleidosphere_analyze,kaleidosphere_plan,kaleidosphere_readback'
+dsh --profile "$toggled_profile" >"$evidence_dir/dsh-toggled.log" 2>&1 &
+dsh_pid=$!
+wait_for_file "$KS_PROBE_ACTIVE"
+wait "$dsh_pid"
+unset dsh_pid KS_PROBE_EXPECTED_TOOL_NAMES
+node -e 'const x=require(process.argv[1]); if(x.tools.length!==5||x.tools.includes("kaleidosphere_preview")||x.results.length!==0) process.exit(1)' "$KS_PROBE_ACTIVE"
+[[ -f "$KS_PROBE_DISPOSED" ]]
+[[ "$(find "$runtime_tmp" -maxdepth 1 -type d -name 'kaleidosphere-dsh-*' | wc -l)" -eq 0 ]]
+dsh plugin --profile "$toggled_profile" remove kaleidosphere-dsh-plugin kaleidosphere-dsh-probe >"$evidence_dir/remove-toggled.log" 2>&1
+node -e 'const p=require(process.argv[1]); if(Object.keys(p.dependencies||{}).length||p.dsh.profile.bundles.some(x=>/kaleidosphere/.test(x))) process.exit(1)' "$toggled_profile_dir/package.json"
+
+external_ready="$run_root/external.url"
+external_log="$evidence_dir/external-stub-requests.jsonl"
+node "$repo_root/scripts/ks-external-stub.mjs" --ready "$external_ready" --log "$external_log" \
+  >"$evidence_dir/external-stub.stdout.log" 2>"$evidence_dir/external-stub.stderr.log" &
+external_pid=$!
+wait_for_file "$external_ready"
+external_url="$(<"$external_ready")"
+external_profile=ks-external
+external_profile_dir="$dsh_home/profiles/$external_profile"
+dsh plugin --profile "$external_profile" add "$plugin_spec" >"$evidence_dir/add-external.log" 2>&1
+dsh plugin --profile "$external_profile" add "$repo_root/test/dsh-probe-bundle" >"$evidence_dir/add-external-probe.log" 2>&1
+printf '%s\n' \
+  '- id: kaleidosphere-dsh-plugin' \
+  '  config:' \
+  '    runtimeMode: external' \
+  '    external:' \
+  "      baseUrl: $external_url" \
+  '    expose:' \
+  '      status: true' \
+  '      discovery: false' \
+  '      analyze: false' \
+  '      plan: false' \
+  '      preview: false' \
+  '      readback: false' \
+  >"$external_profile_dir/cordis.patch.yml"
+export KS_PROBE_ACTIVE="$evidence_dir/active-external.json"
+export KS_PROBE_DISPOSED="$evidence_dir/disposed-external.txt"
+export KS_PROBE_MODE=status
+export KS_PROBE_EXPECTED_TOOL_NAMES='kaleidosphere_status'
+dsh --profile "$external_profile" >"$evidence_dir/dsh-external.log" 2>&1 &
+dsh_pid=$!
+wait_for_file "$KS_PROBE_ACTIVE"
+wait "$dsh_pid"
+unset dsh_pid KS_PROBE_EXPECTED_TOOL_NAMES
+node -e 'const x=require(process.argv[1]); if(x.tools.length!==1||x.results.length!==1||x.results[0].value?.response?.result?.status!=="EXTERNAL_STUB_READY") process.exit(1)' "$KS_PROBE_ACTIVE"
+[[ -f "$KS_PROBE_DISPOSED" ]]
+[[ "$(find "$runtime_tmp" -maxdepth 1 -type d -name 'kaleidosphere-dsh-*' | wc -l)" -eq 0 ]]
+node -e 'const fs=require("fs");const x=fs.readFileSync(process.argv[1],"utf8").trim().split("\n").map(JSON.parse);if(x.length!==2||x[0].path!=="/v2/capabilities"||x[1].path!=="/v2/intents"||x[1].action!=="status")process.exit(1)' "$external_log"
+kill -TERM "$external_pid"
+wait "$external_pid"
+unset external_pid
+dsh plugin --profile "$external_profile" remove kaleidosphere-dsh-plugin kaleidosphere-dsh-probe >"$evidence_dir/remove-external.log" 2>&1
+node -e 'const p=require(process.argv[1]); if(Object.keys(p.dependencies||{}).length||p.dsh.profile.bundles.some(x=>/kaleidosphere/.test(x))) process.exit(1)' "$external_profile_dir/package.json"
+fi
+
 sha256sum "$package_file" >"$evidence_dir/package.sha256"
-node - <<'NODE' "$evidence_dir"
+node - <<'NODE' "$evidence_dir" "$advanced_features"
 const fs = require('fs')
 const path = require('path')
 const dir = process.argv[2]
+const advanced = process.argv[3] === '1'
 const active = JSON.parse(fs.readFileSync(path.join(dir, 'active.json')))
 const reinstall = JSON.parse(fs.readFileSync(path.join(dir, 'active-reinstall.json')))
 const summary = {
@@ -140,6 +220,8 @@ const summary = {
   install: 'PASS', dumpConfig: 'PASS', activeTools: active.tools,
   toolExecutions: active.results.length, hmrUnload: 'PASS', hmrReload: 'PASS',
   removal: 'PASS', reinstall: reinstall.results.length === 6 ? 'PASS' : 'FAIL', invalidConfig: 'PASS',
+  intentExposure: advanced ? '5_OF_6_REAL_HOST_PASS' : 'NOT_EXPECTED_FOR_ARTIFACT',
+  externalBinding: advanced ? 'ATTESTED_LOOPBACK_V2_PASS' : 'NOT_EXPECTED_FOR_ARTIFACT',
   residue: 'ZERO',
 }
 fs.writeFileSync(path.join(dir, 'summary.json'), `${JSON.stringify(summary, null, 2)}\n`)

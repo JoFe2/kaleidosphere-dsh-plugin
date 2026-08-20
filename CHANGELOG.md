@@ -6,7 +6,15 @@ Harness Developer Preview ABI changes.
 
 ## [Unreleased]
 
-- No unreleased product changes.
+- Use DSH's shipped `headless` agent profile for the copy-paste fixture flow,
+  so installation leads directly to a natural-language DSH request.
+- Add a deterministic rc.8 agent-level probe covering model-visible discovery,
+  KS tool execution, negative cases, restart cleanup, and removal against the
+  immutable Preview release bytes.
+- Add six advanced boolean intent-exposure switches while retaining all six as
+  the one-click default.
+- Add an advanced fail-closed loopback binding to an existing attested
+  KaleidoSphere v0.16.0 External API v2 runtime; embedded remains the default.
 
 ## [0.1.0-preview.1] - 2026-08-20
 

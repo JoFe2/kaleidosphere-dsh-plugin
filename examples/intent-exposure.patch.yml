@@ -1,0 +1,11 @@
+- id: kaleidosphere-dsh-plugin
+  config:
+    source:
+      mode: fixture
+    expose:
+      status: true
+      discovery: true
+      analyze: true
+      plan: true
+      preview: true
+      readback: true

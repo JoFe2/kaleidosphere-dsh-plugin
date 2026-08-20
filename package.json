@@ -41,6 +41,7 @@
   "scripts": {
     "test": "node --test test/*.test.mjs",
     "test:dsh": "bash scripts/test-dsh-rc8.sh",
+    "test:dsh-agent": "bash scripts/test-dsh-agent-rc8.sh",
     "verify:package": "node scripts/verify-vendor.mjs && node scripts/verify-third-party.mjs && node scripts/verify-package.mjs",
     "verify:release": "bash scripts/verify-release-tarball.sh"
   },

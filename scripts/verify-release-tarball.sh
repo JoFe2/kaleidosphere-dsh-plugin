@@ -84,7 +84,8 @@ for required in "${required_members[@]}"; do
 done
 
 if [[ "${VERIFY_RELEASE_SKIP_DSH:-0}" != 1 ]]; then
-  PLUGIN_SPEC="$asset_file" bash "$repo_root/scripts/test-dsh-rc8.sh"
+  DSH_EXPECT_ADVANCED_FEATURES="${VERIFY_RELEASE_EXPECT_ADVANCED_FEATURES:-0}" \
+    PLUGIN_SPEC="$asset_file" bash "$repo_root/scripts/test-dsh-rc8.sh"
 fi
 
 if [[ -n "${EVIDENCE_DIR:-}" ]]; then

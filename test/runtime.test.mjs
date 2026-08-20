@@ -1,9 +1,14 @@
 import assert from 'node:assert/strict'
 import { readFile, readdir } from 'node:fs/promises'
+import { createServer } from 'node:http'
 import os from 'node:os'
 import test from 'node:test'
 
 import { CLOSED_INTENTS, createToolDefinitions, KaleidoSphereRuntime, TOOL_NAMES } from '../lib/runtime.mjs'
+import {
+  capabilityAttestationV2,
+  executeExternalIntentV2,
+} from '../vendor/kaleidosphere-v0.16.0/services/bi-agent/src/external-api-v2.mjs'
 
 const expectedDigests = JSON.parse(await readFile(new URL('./expected-fixture-digests.json', import.meta.url), 'utf8'))
 
@@ -53,6 +58,96 @@ test('tool surface is six separate discoverable native names', async () => {
   } finally {
     await runtime.dispose()
   }
+})
+
+test('intent exposure defaults on and accepts six fail-closed boolean toggles', async () => {
+  const runtime = await KaleidoSphereRuntime.create({
+    expose: { discovery: false, plan: false, preview: false },
+  })
+  try {
+    assert.deepEqual(createToolDefinitions(runtime).map(tool => tool.name), [
+      'kaleidosphere_status',
+      'kaleidosphere_analyze',
+      'kaleidosphere_readback',
+    ])
+  } finally {
+    await runtime.dispose()
+  }
+
+  await assert.rejects(KaleidoSphereRuntime.create({ expose: { unknown: false } }),
+    /KS_DSH_EXPOSURE_CONFIG_INVALID/)
+  await assert.rejects(KaleidoSphereRuntime.create({ expose: { analyze: 'yes' } }),
+    /KS_DSH_EXPOSURE_BOOLEAN_REQUIRED_ANALYZE/)
+  await assert.rejects(KaleidoSphereRuntime.create({
+    expose: Object.fromEntries(CLOSED_INTENTS.map(action => [action, false])),
+  }), /KS_DSH_EXPOSURE_EMPTY/)
+})
+
+test('external runtime mode binds the attested loopback v2 API without an embedded runtime', async () => {
+  const requests = []
+  const server = createServer((request, response) => {
+    const chunks = []
+    request.on('data', chunk => chunks.push(chunk))
+    request.on('end', async () => {
+      try {
+        requests.push({ method: request.method, url: request.url })
+        let value
+        if (request.method === 'GET' && request.url === '/v2/capabilities') {
+          value = capabilityAttestationV2()
+        } else if (request.method === 'POST' && request.url === '/v2/intents') {
+          value = await executeExternalIntentV2(JSON.parse(Buffer.concat(chunks).toString('utf8')), {
+            status: () => ({ status: 'EXTERNAL_READY', sourceMode: 'fixture', engine: 'mssql' }),
+          })
+        } else {
+          response.writeHead(404).end()
+          return
+        }
+        response.writeHead(200, { 'content-type': 'application/json' })
+        response.end(JSON.stringify(value))
+      } catch (error) {
+        response.writeHead(500, { 'content-type': 'application/json' })
+        response.end(JSON.stringify({ error: error.message }))
+      }
+    })
+  })
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
+  const address = server.address()
+  assert(address && typeof address !== 'string')
+  const before = new Set((await readdir(os.tmpdir())).filter(name => name.startsWith('kaleidosphere-dsh-')))
+  const expose = Object.fromEntries(CLOSED_INTENTS.map(action => [action, action === 'status']))
+  const runtime = await KaleidoSphereRuntime.create({
+    runtimeMode: 'external',
+    external: { baseUrl: `http://127.0.0.1:${address.port}` },
+    expose,
+  })
+  try {
+    assert.deepEqual(createToolDefinitions(runtime).map(tool => tool.name), ['kaleidosphere_status'])
+    const status = await runtime.execute('status')
+    assert.equal(status.response.result.status, 'EXTERNAL_READY')
+    assert.equal(status.evidence.status, 'succeeded')
+    const after = (await readdir(os.tmpdir())).filter(name =>
+      name.startsWith('kaleidosphere-dsh-') && !before.has(name))
+    assert.deepEqual(after, [])
+    assert.deepEqual(requests, [
+      { method: 'GET', url: '/v2/capabilities' },
+      { method: 'POST', url: '/v2/intents' },
+    ])
+  } finally {
+    await runtime.dispose()
+    await new Promise(resolve => server.close(resolve))
+  }
+
+  await assert.rejects(KaleidoSphereRuntime.create({ runtimeMode: 'external' }),
+    /KS_DSH_EXTERNAL_CONFIG_REQUIRED/)
+  await assert.rejects(KaleidoSphereRuntime.create({
+    runtimeMode: 'external',
+    source: { mode: 'fixture' },
+    external: { baseUrl: 'http://127.0.0.1:18790' },
+  }), /KS_DSH_EXTERNAL_SOURCE_DENIED/)
+  await assert.rejects(KaleidoSphereRuntime.create({
+    runtimeMode: 'external',
+    external: { baseUrl: 'https://ks.example.com' },
+  }), /KS_DSH_EXTERNAL_BASE_URL_DENIED/)
 })
 
 test('configuration fails loud and analysis-dependent tools explain missing state', async () => {
