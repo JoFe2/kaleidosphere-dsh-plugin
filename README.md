@@ -71,6 +71,10 @@ This repository ships prebuilt ESM; GitHub installation needs no `prepare` scrip
 
 This Preview proves the deterministic fixture and exact rc.8 load/tool/unload/remove/reinstall lifecycle. It does not claim DSH stable ABI, host-wide DSH security, malicious third-party plugin containment, production readiness, live customer-database evidence, universal database support, Superset mutation, or upstream DeepSeek endorsement.
 
+Report suspected vulnerabilities through the private path described in the
+[security policy](SECURITY.md); never post credentials or exploit details in a
+public issue.
+
 ## Development
 
 ```sh

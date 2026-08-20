@@ -16,7 +16,7 @@ try {
   const output = execFileSync('npm', ['pack', '--json', '--pack-destination', temp], { cwd: root, encoding: 'utf8' })
   const [packed] = JSON.parse(output)
   const paths = packed.files.map(item => item.path)
-  for (const required of ['package.json', 'index.js', 'cordis.patch.yml', 'CHANGELOG.md', 'COMPATIBILITY.md', 'LICENSE', 'NOTICE',
+  for (const required of ['package.json', 'index.js', 'cordis.patch.yml', 'CHANGELOG.md', 'COMPATIBILITY.md', 'SECURITY.md', 'LICENSE', 'NOTICE',
     'VENDORED_MANIFEST.json', 'THIRD_PARTY_MANIFEST.json', 'lib/runtime.mjs',
     'vendor/kaleidosphere-v0.16.0/LICENSE', 'third_party/oracledb-7.0.1/LICENSE.txt']) assert(paths.includes(required), required)
   assert(!paths.some(item => item.startsWith('test/') || item.startsWith('scripts/') || item.includes('node_modules')))
