@@ -15,6 +15,15 @@ npm run verify:package
 npm run test:dsh
 ```
 
+After publishing a release, verify the downloaded asset, sidecar, packaged
+contract, and full exact-host lifecycle:
+
+```sh
+npm run verify:release -- \
+  https://github.com/JoFe2/kaleidosphere-dsh-plugin/releases/download/v0.1.0-preview.1/kaleidosphere-dsh-plugin-0.1.0-preview.1.tgz \
+  https://github.com/JoFe2/kaleidosphere-dsh-plugin/releases/download/v0.1.0-preview.1/kaleidosphere-dsh-plugin-0.1.0-preview.1.tgz.sha256
+```
+
 The exact-host smoke installs DeepSeek Harness `0.1.0-rc.8` in a temporary
 profile, executes all six tools, exercises HMR unload/reload and removal, and
 deletes its temporary directory. Set `DSH_TOOLS_ROOT` only to reuse a trusted

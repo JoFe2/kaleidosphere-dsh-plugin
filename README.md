@@ -87,3 +87,7 @@ npm run test:dsh
 ```
 
 The exact DSH smoke installs a packed tarball into a fresh profile, checks the bundle layer and ACTIVE tool row, executes all six tools through `ctx.tools.execute`, exercises HMR unload/reload, removes/reinstalls the package, and proves scoped temporary cleanup.
+
+`npm run verify:release -- <release.tgz> <release.tgz.sha256>` additionally
+checks an immutable local or GitHub-hosted release asset and its sidecar before
+running that same exact-host lifecycle against the downloaded bytes.
