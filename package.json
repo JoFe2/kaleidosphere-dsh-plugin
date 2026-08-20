@@ -15,6 +15,7 @@
     "cordis.patch.yml",
     "README.md",
     "CHANGELOG.md",
+    "COMPATIBILITY.md",
     "LICENSE",
     "NOTICE",
     "VENDORED_MANIFEST.json",

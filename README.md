@@ -4,6 +4,9 @@ Native database analysis inside DeepSeek Harness — one plugin install, no sepa
 
 > Preview compatibility: DeepSeek Harness `dsh-v0.1.0-rc.8` / `@deepseek-ai/dsh@0.1.0-rc.8` at `141eb6fef83422698aef7a981029e843e8161534`. DSH is a Developer Preview and breaking updates may require a plugin release.
 
+See the [evidence-backed compatibility matrix](COMPATIBILITY.md) for the exact
+host, Node.js, operating-system, and database support boundaries.
+
 ## Install and try the fixture
 
 Install DSH and pnpm, then add the immutable plugin release to a profile:
