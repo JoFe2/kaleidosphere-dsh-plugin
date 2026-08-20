@@ -1,0 +1,6 @@
+- id: kaleidosphere-dsh-plugin
+  config:
+    runtimeMode: external
+    external:
+      baseUrl: http://127.0.0.1:18790
+      timeoutMs: 30000

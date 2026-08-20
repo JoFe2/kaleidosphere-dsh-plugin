@@ -1,6 +1,7 @@
 import { existsSync, writeFileSync } from 'node:fs'
 
 const names = ['status', 'discovery', 'analyze', 'plan', 'preview', 'readback'].map(action => `kaleidosphere_${action}`)
+const expectedNames = process.env.KS_PROBE_EXPECTED_TOOL_NAMES?.split(',').filter(Boolean) ?? names
 const signal = new AbortController().signal
 
 function writeJson(filename, value) {
@@ -30,6 +31,12 @@ async function executeAll(ctx) {
   return results
 }
 
+async function executeStatus(ctx) {
+  const result = await ctx.tools.execute({ signal, callId: 'ks-probe-status', name: 'kaleidosphere_status', arguments: {} })
+  if (result.isError) throw new Error(`kaleidosphere_status: ${result.content.map(block => block.text ?? '').join(' ')}`)
+  return [{ name: 'kaleidosphere_status', value: result.value, content: result.content }]
+}
+
 export const name = 'kaleidosphere-dsh-probe'
 export const inject = ['tools']
 
@@ -42,8 +49,17 @@ export function apply(ctx) {
     try {
       if (phase === 'boot') {
         const tools = available(ctx)
-        if (tools.length !== names.length) return
-        writeJson(process.env.KS_PROBE_ACTIVE, { state: 'ACTIVE', tools, results: await executeAll(ctx) })
+        if (tools.length !== expectedNames.length || expectedNames.some(name => !tools.includes(name))) return
+        const results = process.env.KS_PROBE_MODE === 'inventory'
+          ? []
+          : process.env.KS_PROBE_MODE === 'status'
+            ? await executeStatus(ctx)
+            : await executeAll(ctx)
+        writeJson(process.env.KS_PROBE_ACTIVE, { state: 'ACTIVE', tools, results })
+        if (process.env.KS_PROBE_MODE === 'inventory' || process.env.KS_PROBE_MODE === 'status') {
+          process.emit('SIGTERM')
+          return
+        }
         if (process.env.KS_PROBE_MODE === 'oneshot') {
           process.emit('SIGTERM')
           return

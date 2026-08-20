@@ -13,6 +13,7 @@ npm ci --ignore-scripts
 npm test
 npm run verify:package
 npm run test:dsh
+npm run test:dsh-agent
 ```
 
 After publishing a release, verify the downloaded asset, sidecar, packaged
@@ -20,14 +21,20 @@ contract, and full exact-host lifecycle:
 
 ```sh
 npm run verify:release -- \
-  https://github.com/JoFe2/kaleidosphere-dsh-plugin/releases/download/v0.1.0-preview.1/kaleidosphere-dsh-plugin-0.1.0-preview.1.tgz \
-  https://github.com/JoFe2/kaleidosphere-dsh-plugin/releases/download/v0.1.0-preview.1/kaleidosphere-dsh-plugin-0.1.0-preview.1.tgz.sha256
+  https://github.com/JoFe2/kaleidosphere-dsh-plugin/releases/download/v0.1.0-preview.2/kaleidosphere-dsh-plugin-0.1.0-preview.2.tgz \
+  https://github.com/JoFe2/kaleidosphere-dsh-plugin/releases/download/v0.1.0-preview.2/kaleidosphere-dsh-plugin-0.1.0-preview.2.tgz.sha256
 ```
 
 The exact-host smoke installs DeepSeek Harness `0.1.0-rc.8` in a temporary
 profile, executes all six tools, exercises HMR unload/reload and removal, and
 deletes its temporary directory. Set `DSH_TOOLS_ROOT` only to reuse a trusted
 existing exact-rc.8 tool installation.
+
+The agent-level smoke uses a local deterministic model stub and current packed
+candidate bytes by default; `PLUGIN_SPEC` accepts an explicit immutable release
+artifact. It exercises a natural-language headless task through tool discovery,
+execution, result return, negative cases, restart, and removal. The stub forces
+its tool calls; this is pipeline evidence, not real-model selection evidence.
 
 ## Change rules
 

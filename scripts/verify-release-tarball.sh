@@ -49,6 +49,7 @@ fi
 expected_hash="${expected_hash,,}"
 observed_hash="$(sha256sum "$asset_file" | awk '{print $1}')"
 [[ "$observed_hash" == "$expected_hash" ]]
+expected_plugin_version="${EXPECTED_PLUGIN_VERSION:-$(node -e 'process.stdout.write(require(process.argv[1]).version)' "$repo_root/package.json")}"
 
 while IFS= read -r member; do
   case "$member" in
@@ -60,10 +61,11 @@ while IFS= read -r member; do
 done < <(tar -tzf "$asset_file")
 
 tar -xOf "$asset_file" package/package.json >"$verification_root/package.json"
-node - <<'NODE' "$verification_root/package.json"
+node - <<'NODE' "$verification_root/package.json" "$expected_plugin_version"
 const manifest = require(process.argv[2])
+const expectedVersion = process.argv[3]
 if (manifest.name !== 'kaleidosphere-dsh-plugin') throw new Error(`unexpected package name: ${manifest.name}`)
-if (manifest.version !== '0.1.0-preview.1') throw new Error(`unexpected package version: ${manifest.version}`)
+if (manifest.version !== expectedVersion) throw new Error(`unexpected package version: ${manifest.version}`)
 if (manifest.dsh?.bundle?.patch !== './cordis.patch.yml') throw new Error('missing exact dsh.bundle.patch')
 if (manifest.scripts?.prepare !== undefined) throw new Error('release package must not declare prepare')
 if (manifest.peerDependencies?.['@deepseek-ai/dsh-tools'] !== '0.1.0-rc.8') throw new Error('unexpected DSH tools peer')
@@ -84,7 +86,13 @@ for required in "${required_members[@]}"; do
 done
 
 if [[ "${VERIFY_RELEASE_SKIP_DSH:-0}" != 1 ]]; then
-  PLUGIN_SPEC="$asset_file" bash "$repo_root/scripts/test-dsh-rc8.sh"
+  expected_digests="$repo_root/test/expected-fixture-digests.json"
+  if [[ "$expected_plugin_version" = '0.1.0-preview.1' ]]; then
+    expected_digests="$repo_root/test/expected-fixture-digests-preview.1.json"
+  fi
+  DSH_EXPECT_ADVANCED_FEATURES="${VERIFY_RELEASE_EXPECT_ADVANCED_FEATURES:-0}" \
+    DSH_EXPECTED_FIXTURE_DIGESTS="$expected_digests" \
+    PLUGIN_SPEC="$asset_file" bash "$repo_root/scripts/test-dsh-rc8.sh"
 fi
 
 if [[ -n "${EVIDENCE_DIR:-}" ]]; then
