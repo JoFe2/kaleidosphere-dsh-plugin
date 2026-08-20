@@ -6,6 +6,10 @@ Harness Developer Preview ABI changes.
 
 ## [Unreleased]
 
+- No unreleased product changes.
+
+## [0.1.0-preview.2] - 2026-08-20
+
 - Use DSH's shipped `headless` agent profile for the copy-paste fixture flow,
   so installation leads directly to a natural-language DSH request.
 - Add a deterministic rc.8 agent-level probe covering model-visible discovery,
@@ -28,5 +32,6 @@ Harness Developer Preview ABI changes.
 - Add HMR unload/reload, remove/reinstall, invalid-configuration, package,
   provenance, and exact-rc.8 lifecycle verification.
 
-[Unreleased]: https://github.com/JoFe2/kaleidosphere-dsh-plugin/compare/v0.1.0-preview.1...HEAD
+[Unreleased]: https://github.com/JoFe2/kaleidosphere-dsh-plugin/compare/v0.1.0-preview.2...HEAD
+[0.1.0-preview.2]: https://github.com/JoFe2/kaleidosphere-dsh-plugin/releases/tag/v0.1.0-preview.2
 [0.1.0-preview.1]: https://github.com/JoFe2/kaleidosphere-dsh-plugin/releases/tag/v0.1.0-preview.1

@@ -8,12 +8,8 @@ bin_root="$run_root/bin"
 homes_root="$run_root/homes"
 runtime_tmp="$run_root/runtime-tmp"
 evidence_dir="${EVIDENCE_DIR:-$run_root/evidence}"
-release_name='kaleidosphere-dsh-plugin-0.1.0-preview.1.tgz'
-release_url="https://github.com/JoFe2/kaleidosphere-dsh-plugin/releases/download/v0.1.0-preview.1/$release_name"
-release_sha='32ca9db5499d4528b87aaaf22608e13e86eca19667f0c03a98249bf1b4c0f610'
-expected_plugin_sha="${EXPECTED_PLUGIN_SHA256:-$release_sha}"
-plugin_artifact_label="${PLUGIN_ARTIFACT_LABEL:-public-v0.1.0-preview.1}"
-plugin_file="$run_root/$release_name"
+expected_plugin_sha="${EXPECTED_PLUGIN_SHA256:-}"
+plugin_artifact_label="${PLUGIN_ARTIFACT_LABEL:-local-candidate}"
 mkdir -p "$bin_root" "$homes_root" "$runtime_tmp" "$evidence_dir"
 
 cleanup() {
@@ -34,14 +30,17 @@ node -e 'const p=require(process.argv[1]); if(p.version!=="0.1.0-rc.8") process.
 export PATH="$tools_root/node_modules/.bin:$bin_root:$PATH"
 
 if [[ -n "${PLUGIN_SPEC:-}" ]]; then
+  plugin_name="$(basename "$PLUGIN_SPEC")"
+  plugin_file="$run_root/$plugin_name"
   cp -- "$PLUGIN_SPEC" "$plugin_file"
 else
-  env -u GH_TOKEN -u GITHUB_TOKEN curl --fail --silent --show-error --location \
-    "$release_url" --output "$plugin_file"
+  pack_json="$(cd "$repo_root" && npm pack --json --pack-destination "$run_root" --silent)"
+  plugin_name="$(node -e 'const fs=require("fs");const x=JSON.parse(fs.readFileSync(0,"utf8"));process.stdout.write(x[0].filename)' <<<"$pack_json")"
+  plugin_file="$run_root/$plugin_name"
 fi
 observed_sha="$(sha256sum "$plugin_file" | awk '{print $1}')"
-[[ "$observed_sha" = "$expected_plugin_sha" ]]
-printf '%s  %s\n' "$observed_sha" "$release_name" >"$evidence_dir/public-release.sha256"
+if [[ -n "$expected_plugin_sha" ]]; then [[ "$observed_sha" = "$expected_plugin_sha" ]]; fi
+printf '%s  %s\n' "$observed_sha" "$plugin_name" >"$evidence_dir/plugin-artifact.sha256"
 
 stub_ready="$run_root/stub.url"
 stub_log="$evidence_dir/model-stub-requests.jsonl"

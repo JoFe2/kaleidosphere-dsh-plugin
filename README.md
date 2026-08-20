@@ -14,7 +14,7 @@ one-shot agent profile:
 
 ```sh
 npm install --global @deepseek-ai/dsh@0.1.0-rc.8 pnpm@11.7.0
-dsh plugin --profile headless add github:JoFe2/kaleidosphere-dsh-plugin#v0.1.0-preview.1
+dsh plugin --profile headless add github:JoFe2/kaleidosphere-dsh-plugin#v0.1.0-preview.2
 dsh --profile headless --dump-config
 dsh --profile headless "Analyze the configured KaleidoSphere database and report its engine and snapshot digest."
 ```
@@ -116,7 +116,7 @@ npm run test:dsh-agent
 
 The exact DSH smoke installs a packed tarball into a fresh profile, checks the bundle layer and ACTIVE tool row, executes all six tools through `ctx.tools.execute`, exercises HMR unload/reload, removes/reinstalls the package, and proves scoped temporary cleanup.
 
-The agent smoke downloads or accepts the immutable public release TGZ, installs it into fresh rc.8 `headless` profiles, and sends a natural-language task through the real headless runner, Agent Loop, model-facing tool schema, tool executor, and KS fixture. Its local deterministic model stub deliberately forces `kaleidosphere_analyze`; the test proves the assembled agent pipeline, not that a real LLM semantically chose the tool.
+The agent smoke packs the current candidate by default, or accepts an explicit immutable release TGZ, installs it into fresh rc.8 `headless` profiles, and sends a natural-language task through the real headless runner, Agent Loop, model-facing tool schema, tool executor, and KS fixture. Its local deterministic model stub deliberately forces `kaleidosphere_analyze`; the test proves the assembled agent pipeline, not that a real LLM semantically chose the tool.
 
 `npm run verify:release -- <release.tgz> <release.tgz.sha256>` additionally
 checks an immutable local or GitHub-hosted release asset and its sidecar before

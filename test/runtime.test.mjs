@@ -18,6 +18,7 @@ test('fixture executes all six released intents through External API v2 and K1',
     const status = await runtime.execute('status')
     assert.equal(status.response.action, 'status')
     assert.equal(status.response.result.status, 'READY')
+    assert.equal(status.response.result.pluginVersion, '0.1.0-preview.2')
 
     const analyze = await runtime.execute('analyze')
     assert.equal(analyze.response.action, 'analyze')
@@ -148,6 +149,54 @@ test('external runtime mode binds the attested loopback v2 API without an embedd
     runtimeMode: 'external',
     external: { baseUrl: 'https://ks.example.com' },
   }), /KS_DSH_EXTERNAL_BASE_URL_DENIED/)
+})
+
+test('external runtime preserves caller cancellation and distinguishes transport timeout', async () => {
+  const server = createServer((request, response) => {
+    if (request.method === 'GET' && request.url === '/v2/capabilities') {
+      response.writeHead(200, { 'content-type': 'application/json' })
+      response.end(JSON.stringify(capabilityAttestationV2()))
+      return
+    }
+    if (request.method === 'POST' && request.url === '/v2/intents') {
+      request.resume()
+      setTimeout(() => {
+        if (response.destroyed) return
+        response.writeHead(200, { 'content-type': 'application/json' })
+        response.end('{}')
+      }, 250)
+      return
+    }
+    response.writeHead(404).end()
+  })
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
+  const address = server.address()
+  assert(address && typeof address !== 'string')
+  const baseUrl = `http://127.0.0.1:${address.port}`
+  try {
+    const cancellable = await KaleidoSphereRuntime.create({
+      runtimeMode: 'external', external: { baseUrl, timeoutMs: 1_000 },
+    })
+    try {
+      const controller = new AbortController()
+      const execution = cancellable.execute('status', {}, controller.signal)
+      controller.abort()
+      await assert.rejects(execution, error => error?.name === 'AbortError')
+    } finally {
+      await cancellable.dispose()
+    }
+
+    const bounded = await KaleidoSphereRuntime.create({
+      runtimeMode: 'external', external: { baseUrl, timeoutMs: 100 },
+    })
+    try {
+      await assert.rejects(bounded.execute('status'), /KS_DSH_EXTERNAL_TIMEOUT/)
+    } finally {
+      await bounded.dispose()
+    }
+  } finally {
+    await new Promise(resolve => server.close(resolve))
+  }
 })
 
 test('configuration fails loud and analysis-dependent tools explain missing state', async () => {

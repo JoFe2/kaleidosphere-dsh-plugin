@@ -52,6 +52,7 @@ export KS_PROBE_RELOADED="$evidence_dir/reloaded.json"
 export KS_PROBE_FAILURE="$evidence_dir/failure.json"
 export KS_PROBE_DISPOSED="$evidence_dir/disposed.txt"
 export KS_PROBE_MODE=hmr
+expected_fixture_digests="${DSH_EXPECTED_FIXTURE_DIGESTS:-$repo_root/test/expected-fixture-digests.json}"
 
 dsh --profile "$profile_name" >"$evidence_dir/dsh.log" 2>&1 &
 dsh_pid=$!
@@ -68,7 +69,7 @@ wait_for_file() {
 }
 
 wait_for_file "$KS_PROBE_ACTIVE"
-node - <<'NODE' "$KS_PROBE_ACTIVE" "$repo_root/test/expected-fixture-digests.json"
+node - <<'NODE' "$KS_PROBE_ACTIVE" "$expected_fixture_digests"
 const active = require(process.argv[2])
 const expected = require(process.argv[3])
 if (active.state !== 'ACTIVE' || active.tools.length !== 6 || active.results.length !== 6) process.exit(1)
