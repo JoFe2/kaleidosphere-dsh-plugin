@@ -77,6 +77,9 @@ public issue.
 
 ## Development
 
+See [CONTRIBUTING.md](CONTRIBUTING.md) for DCO, protected-PR, compatibility,
+provenance, and evidence requirements.
+
 ```sh
 npm test
 npm run verify:package
