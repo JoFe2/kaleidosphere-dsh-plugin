@@ -1,0 +1,1 @@
+oracledb-7.0.1-darwin-arm64.node v24.11.1 6a91ac655ae2460fb19c2227f62d85e02b98cd54 a8d9752420b96d37d5a76c8a5d371abdb95c6cba Thu, 09 Jul 2026 10:04:02 GMT

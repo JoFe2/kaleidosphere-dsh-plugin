@@ -1,0 +1,1 @@
+oracledb-7.0.1-linux-x64.node v22.19.0 6a91ac655ae2460fb19c2227f62d85e02b98cd54 a8d9752420b96d37d5a76c8a5d371abdb95c6cba Thu, 09 Jul 2026 11:59:00 GMT

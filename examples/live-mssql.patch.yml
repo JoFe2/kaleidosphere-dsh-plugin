@@ -1,0 +1,20 @@
+- id: kaleidosphere-dsh-plugin
+  config:
+    source:
+      mode: live
+      profile:
+        schemaVersion: chimpmaera.db/analyze-profile/v1
+        profileId: company-readonly-mssql
+        engine: mssql
+        mode: RUNTIME
+        queryPack: {version: v1}
+        scope: {database: Analytics, container: null, schemas: [dbo]}
+        policy: {access: READ_ONLY, allowRowSamples: false, maxQueryTimeoutMs: 10000}
+        adapter:
+          kind: mssql
+          host: sql.example.internal
+          port: 1433
+          user: kaleidosphere_reader
+          passwordEnv: KS_MSSQL_PASSWORD
+          encrypt: true
+          trustServerCertificate: false

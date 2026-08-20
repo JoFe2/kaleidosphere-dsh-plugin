@@ -1,0 +1,16 @@
+{
+  "schemaVersion": "kaleidosphere.dsh/third-party-provenance/v1",
+  "packages": [
+    {
+      "name": "oracledb",
+      "version": "7.0.1",
+      "source": "https://www.npmjs.com/package/oracledb/v/7.0.1",
+      "license": "Apache-2.0 OR UPL-1.0",
+      "selectedLicense": "Apache-2.0",
+      "root": "third_party/oracledb-7.0.1",
+      "fileCount": 136,
+      "digestAlgorithm": "sha256(relative-path NUL content NUL, lexicographic paths)",
+      "digest": "04418f36c746a5f1c3ccf2b67288bfd99f1260765cbb0e5d937f189973426c43"
+    }
+  ]
+}

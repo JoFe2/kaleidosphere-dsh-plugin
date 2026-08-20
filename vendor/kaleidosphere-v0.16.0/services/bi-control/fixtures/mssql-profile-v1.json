@@ -1,0 +1,11 @@
+{
+  "schemaVersion": "chimpmaera.db/analyze-profile/v1",
+  "profileId": "chimpmaera-bi-portable-mssql-fixture",
+  "engine": "mssql",
+  "mode": "SYNTHETIC",
+  "queryPack": {"version": "v1"},
+  "scope": {"database": "CM_BI_FIXTURE", "container": null, "schemas": ["dbo"]},
+  "policy": {"access": "READ_ONLY", "allowRowSamples": false, "maxQueryTimeoutMs": 5000},
+  "adapter": {"kind": "synthetic", "fixture": "mssql-results-v1.json"}
+}
+

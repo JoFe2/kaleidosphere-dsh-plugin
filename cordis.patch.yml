@@ -1,0 +1,7 @@
+- insert:
+    - id: kaleidosphere-dsh-plugin
+      name: kaleidosphere-dsh-plugin
+      inject: [tools]
+      config:
+        source:
+          mode: fixture

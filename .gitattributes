@@ -1,0 +1,4 @@
+# Preserve these exact v0.16.0 upstream bytes; their trailing blank lines are
+# included in VENDORED_MANIFEST.json and must not be normalized locally.
+vendor/kaleidosphere-v0.16.0/services/bi-control/fixtures/mssql-profile-v1.json whitespace=-blank-at-eof
+vendor/kaleidosphere-v0.16.0/services/bi-control/src/policy.mjs whitespace=-blank-at-eof

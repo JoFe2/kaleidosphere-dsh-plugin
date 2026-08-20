@@ -1,0 +1,4 @@
+- insert:
+    - id: kaleidosphere-dsh-probe
+      name: kaleidosphere-dsh-probe
+      inject: [tools]

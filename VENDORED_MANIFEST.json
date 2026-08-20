@@ -1,0 +1,11 @@
+{
+  "schemaVersion": "kaleidosphere.dsh/vendored-runtime-provenance/v1",
+  "upstream": "https://github.com/JoFe2/KaleidoSphere",
+  "tag": "v0.16.0",
+  "commit": "5a73ff8146afa0067d226cffa639efde959e8fde",
+  "license": "Apache-2.0",
+  "root": "vendor/kaleidosphere-v0.16.0",
+  "fileCount": 73,
+  "digestAlgorithm": "sha256(relative-path NUL content NUL, lexicographic paths)",
+  "digest": "f62109b120c0bc677d47ce4ce8e23278a30bacd7bc3555c1f4877d09cefd58a2"
+}

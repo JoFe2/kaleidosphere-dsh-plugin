@@ -1,0 +1,133 @@
+{
+  "schemaVersion": "chimpmaera.db/profiling-query-manifest/v1",
+  "packId": "chimpmaera.db.data-understanding.mssql",
+  "packVersion": "1.0.0",
+  "engine": "mssql",
+  "queries": [
+    {
+      "id": "mssql.profiling.numeric-aggregate",
+      "category": "numeric-aggregate",
+      "file": "profile-numeric-aggregate.sql",
+      "templateSha256": "7f83aeb9b67454a27db7e004e80c0c937427b1575ba26264ce29cb4c25686ac1",
+      "typeFamilies": ["NUMERIC"],
+      "nativeTypes": ["tinyint", "smallint", "int", "bigint", "decimal", "numeric", "money", "smallmoney", "real", "float"],
+      "outputColumns": ["rowCount", "nullCount", "distinctCount", "minimum", "maximum"],
+      "sortKeys": [],
+      "readOnly": true,
+      "aggregateOnly": true,
+      "rowSamples": false,
+      "labelDistributions": false,
+      "cost": "BOUNDED_SCAN",
+      "timeoutMs": 1000,
+      "privilege": {"minimum": "SELECT on the explicitly allowlisted relation and column"},
+      "fallback": {"onDenied": "Record DENIED or TIMEOUT; do not infer zero rows, nulls, distinct values or extrema"},
+      "provenance": {
+        "sourceType": "OFFICIAL_AGGREGATE_API_REFERENCE",
+        "url": "https://learn.microsoft.com/en-us/sql/t-sql/functions/aggregate-functions-transact-sql",
+        "spdx": "Apache-2.0",
+        "copiedCode": false,
+        "changeMarker": "CM-authored bounded aggregate SELECT template; no third-party query code copied"
+      }
+    },
+    {
+      "id": "mssql.profiling.temporal-aggregate",
+      "category": "temporal-aggregate",
+      "file": "profile-temporal-aggregate.sql",
+      "templateSha256": "c310d0d9060bc99302d29bbac3b827ac0436613c2141fb262ef357ee91e359ee",
+      "typeFamilies": ["TEMPORAL"],
+      "nativeTypes": ["date", "smalldatetime", "datetime", "datetime2"],
+      "outputColumns": ["rowCount", "nullCount", "distinctCount", "minimum", "maximum", "freshnessMaximum"],
+      "sortKeys": [],
+      "readOnly": true,
+      "aggregateOnly": true,
+      "rowSamples": false,
+      "labelDistributions": false,
+      "cost": "BOUNDED_SCAN",
+      "timeoutMs": 1000,
+      "privilege": {"minimum": "SELECT on the explicitly allowlisted relation and column"},
+      "fallback": {"onDenied": "Record DENIED or TIMEOUT; do not infer temporal range or freshness"},
+      "provenance": {
+        "sourceType": "OFFICIAL_AGGREGATE_API_REFERENCE",
+        "url": "https://learn.microsoft.com/en-us/sql/t-sql/functions/cast-and-convert-transact-sql",
+        "spdx": "Apache-2.0",
+        "copiedCode": false,
+        "changeMarker": "CM-authored bounded temporal aggregate SELECT template; no third-party query code copied"
+      }
+    },
+    {
+      "id": "mssql.profiling.category-aggregate",
+      "category": "category-aggregate",
+      "file": "profile-category-aggregate.sql",
+      "templateSha256": "5d505cdb260cab8fe3b711ab05cdaefdd35aa84aa98e4341de04d55759a466e0",
+      "typeFamilies": ["CATEGORY"],
+      "nativeTypes": ["char", "varchar", "nchar", "nvarchar", "uniqueidentifier"],
+      "outputColumns": ["rowCount", "nullCount", "distinctCount"],
+      "sortKeys": [],
+      "readOnly": true,
+      "aggregateOnly": true,
+      "rowSamples": false,
+      "labelDistributions": false,
+      "cost": "BOUNDED_SCAN",
+      "timeoutMs": 1000,
+      "privilege": {"minimum": "SELECT on the explicitly allowlisted relation and column"},
+      "fallback": {"onDenied": "Record DENIED or TIMEOUT; do not infer cardinality or reveal labels"},
+      "provenance": {
+        "sourceType": "OFFICIAL_AGGREGATE_API_REFERENCE",
+        "url": "https://learn.microsoft.com/en-us/sql/t-sql/functions/count-transact-sql",
+        "spdx": "Apache-2.0",
+        "copiedCode": false,
+        "changeMarker": "CM-authored bounded category cardinality SELECT template; no third-party query code copied"
+      }
+    },
+    {
+      "id": "mssql.profiling.text-aggregate",
+      "category": "text-aggregate",
+      "file": "profile-text-aggregate.sql",
+      "templateSha256": "5d505cdb260cab8fe3b711ab05cdaefdd35aa84aa98e4341de04d55759a466e0",
+      "typeFamilies": ["TEXT"],
+      "nativeTypes": ["char", "varchar", "nchar", "nvarchar"],
+      "outputColumns": ["rowCount", "nullCount", "distinctCount"],
+      "sortKeys": [],
+      "readOnly": true,
+      "aggregateOnly": true,
+      "rowSamples": false,
+      "labelDistributions": false,
+      "cost": "BOUNDED_SCAN",
+      "timeoutMs": 1000,
+      "privilege": {"minimum": "SELECT on the explicitly allowlisted relation and column"},
+      "fallback": {"onDenied": "Record DENIED or TIMEOUT; do not infer cardinality or reveal text"},
+      "provenance": {
+        "sourceType": "OFFICIAL_AGGREGATE_API_REFERENCE",
+        "url": "https://learn.microsoft.com/en-us/sql/t-sql/functions/count-transact-sql",
+        "spdx": "Apache-2.0",
+        "copiedCode": false,
+        "changeMarker": "CM-authored bounded text cardinality SELECT template; no third-party query code copied"
+      }
+    },
+    {
+      "id": "mssql.profiling.boolean-aggregate",
+      "category": "boolean-aggregate",
+      "file": "profile-boolean-aggregate.sql",
+      "templateSha256": "5d505cdb260cab8fe3b711ab05cdaefdd35aa84aa98e4341de04d55759a466e0",
+      "typeFamilies": ["BOOLEAN"],
+      "nativeTypes": ["bit"],
+      "outputColumns": ["rowCount", "nullCount", "distinctCount"],
+      "sortKeys": [],
+      "readOnly": true,
+      "aggregateOnly": true,
+      "rowSamples": false,
+      "labelDistributions": false,
+      "cost": "BOUNDED_SCAN",
+      "timeoutMs": 1000,
+      "privilege": {"minimum": "SELECT on the explicitly allowlisted relation and column"},
+      "fallback": {"onDenied": "Record DENIED or TIMEOUT; do not infer boolean cardinality"},
+      "provenance": {
+        "sourceType": "OFFICIAL_AGGREGATE_API_REFERENCE",
+        "url": "https://learn.microsoft.com/en-us/sql/t-sql/functions/count-transact-sql",
+        "spdx": "Apache-2.0",
+        "copiedCode": false,
+        "changeMarker": "CM-authored bounded boolean cardinality SELECT template; no third-party query code copied"
+      }
+    }
+  ]
+}
