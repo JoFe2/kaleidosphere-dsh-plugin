@@ -73,9 +73,6 @@ required_members=(
   package/index.js
   package/cordis.patch.yml
   package/README.md
-  package/CHANGELOG.md
-  package/COMPATIBILITY.md
-  package/SECURITY.md
   package/LICENSE
   package/NOTICE
   package/VENDORED_MANIFEST.json
