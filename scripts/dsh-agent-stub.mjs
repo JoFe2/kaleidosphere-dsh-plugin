@@ -29,6 +29,10 @@ function toolResult(body) {
   return body.messages?.findLast(message => message.role === 'tool')
 }
 
+function toolResults(body) {
+  return body.messages?.filter(message => message.role === 'tool') ?? []
+}
+
 function toolCall(name, callArgs, callId) {
   return [
     { choices: [{ delta: { role: 'assistant', content: '', reasoning_content: '' } }] },
@@ -88,6 +92,27 @@ function responseFor(scenario, body) {
       events: answer(`KS_AGENT_MALFORMED_REJECTED ${String(result.content ?? '').slice(0, 240)}`),
     }
   }
+  if (scenario.startsWith('parameterized-')) {
+    const [, action, mode] = scenario.split('-')
+    const results = toolResults(body)
+    const name = `kaleidosphere_${action}`
+    const validArgs = {
+      discovery: { command: 'start', sessionId: 'agent-e2e-1' },
+      plan: { objective: 'Review weekly order value' },
+      preview: { objective: 'Preview weekly order value' },
+    }[action]
+    if (mode === 'invalid') {
+      if (results.length === 0) return { kind: 'forced-invalid-parameterized-call', events: toolCall(name, {}, `ks-invalid-${action}`) }
+      return { kind: 'answer-after-invalid-parameterized-call', events: answer(`KS_AGENT_PARAMETERIZED_INVALID ${action} ${String(result.content ?? '').slice(0, 240)}`) }
+    }
+    if (action !== 'discovery' && results.length === 0) {
+      return { kind: 'forced-analysis-prerequisite', events: toolCall('kaleidosphere_analyze', {}, `ks-${action}-analyze`) }
+    }
+    if ((action === 'discovery' && results.length === 0) || (action !== 'discovery' && results.length === 1)) {
+      return { kind: 'forced-valid-parameterized-call', events: toolCall(name, validArgs, `ks-valid-${action}`) }
+    }
+    return { kind: 'answer-after-valid-parameterized-call', events: answer(`KS_AGENT_PARAMETERIZED_HAPPY ${action}`) }
+  }
   if (['no-plugin', 'disabled', 'removed'].includes(scenario)) {
     return { kind: 'answer-without-tool', events: answer(`KS_AGENT_UNAVAILABLE scenario=${scenario}`) }
   }
@@ -104,11 +129,15 @@ const server = createServer((request, response) => {
       const body = JSON.parse(raw)
       const scripted = responseFor(scenario, body)
       const advertisedTools = (body.tools ?? []).map(tool => tool.function?.name).filter(Boolean)
+      const advertisedKsSchemas = (body.tools ?? [])
+        .filter(tool => KS_TOOLS.includes(tool.function?.name))
+        .map(tool => ({ name: tool.function.name, parameters: tool.function.parameters }))
       await appendFile(logFile, `${JSON.stringify({
         scenario,
         requestPath: request.url,
         authorizationPresent: typeof request.headers.authorization === 'string',
         ksTools: advertisedTools.filter(name => KS_TOOLS.includes(name)),
+        ksToolSchemas: advertisedKsSchemas,
         userPrompt: body.messages?.find(message => message.role === 'user')?.content ?? null,
         toolResult: toolResult(body)?.content ?? null,
         responseKind: scripted.kind,

@@ -6,7 +6,12 @@ Harness Developer Preview ABI changes.
 
 ## [Unreleased]
 
-- No unreleased product changes.
+- Compile parameterized tool authoring schemas through DSH rc.8 `defineTool`,
+  producing object-rooted model schemas and enforcing required arguments before
+  KaleidoSphere runtime dispatch.
+- Add exact rc.8 schema snapshots plus discovery/plan/preview happy and negative
+  Agent E2E coverage while retaining HMR, remove/reinstall, and zero-residue
+  lifecycle evidence.
 
 ## [0.1.0-preview.2] - 2026-08-20
 

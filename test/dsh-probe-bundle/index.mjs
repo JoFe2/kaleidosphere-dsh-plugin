@@ -12,6 +12,23 @@ function available(ctx) {
   return ctx.tools.schemas().map(item => item.name).filter(name => names.includes(name)).sort()
 }
 
+function parameterizedSchemas(ctx) {
+  return ctx.tools.schemas().filter(item => [
+    'kaleidosphere_discovery',
+    'kaleidosphere_plan',
+    'kaleidosphere_preview',
+  ].includes(item.name))
+}
+
+async function executeInvalid(ctx) {
+  const results = []
+  for (const [index, name] of ['kaleidosphere_discovery', 'kaleidosphere_plan', 'kaleidosphere_preview'].entries()) {
+    const result = await ctx.tools.execute({ signal, callId: `ks-invalid-${index + 1}`, name, arguments: {} })
+    results.push({ name, isError: result.isError, error: result.error ?? null, content: result.content })
+  }
+  return results
+}
+
 async function executeAll(ctx) {
   const calls = [
     ['kaleidosphere_status', {}],
@@ -55,7 +72,13 @@ export function apply(ctx) {
           : process.env.KS_PROBE_MODE === 'status'
             ? await executeStatus(ctx)
             : await executeAll(ctx)
-        writeJson(process.env.KS_PROBE_ACTIVE, { state: 'ACTIVE', tools, results })
+        writeJson(process.env.KS_PROBE_ACTIVE, {
+          state: 'ACTIVE',
+          tools,
+          schemas: parameterizedSchemas(ctx),
+          results,
+          invalid: await executeInvalid(ctx),
+        })
         if (process.env.KS_PROBE_MODE === 'inventory' || process.env.KS_PROBE_MODE === 'status') {
           process.emit('SIGTERM')
           return

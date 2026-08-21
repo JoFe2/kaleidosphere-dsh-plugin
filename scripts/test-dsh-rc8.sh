@@ -73,6 +73,19 @@ node - <<'NODE' "$KS_PROBE_ACTIVE" "$expected_fixture_digests"
 const active = require(process.argv[2])
 const expected = require(process.argv[3])
 if (active.state !== 'ACTIVE' || active.tools.length !== 6 || active.results.length !== 6) process.exit(1)
+if (active.schemas.length !== 3 || active.invalid.length !== 3) process.exit(1)
+for (const schema of active.schemas) {
+  const parameters = schema.parameters
+  if (parameters?.type !== 'object' || typeof parameters.properties !== 'object') process.exit(1)
+  if (!Array.isArray(parameters.required) || parameters.required.length === 0) process.exit(1)
+  for (const property of Object.values(parameters.properties)) {
+    if (Object.hasOwn(property, 'required') || property.type === 'json') process.exit(1)
+  }
+}
+for (const result of active.invalid) {
+  const serialized = JSON.stringify(result)
+  if (!result.isError || !serialized.includes('INVALID_ARGS') || serialized.includes('EXTERNAL_BI_REQUEST_SURFACE_DENIED')) process.exit(1)
+}
 for (const result of active.results) {
   const action = result.name.replace('kaleidosphere_', '')
   const observed = {
