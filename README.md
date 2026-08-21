@@ -14,7 +14,7 @@ one-shot agent profile:
 
 ```sh
 npm install --global @deepseek-ai/dsh@0.1.0-rc.8 pnpm@11.7.0
-dsh plugin --profile headless add github:JoFe2/kaleidosphere-dsh-plugin#v0.1.0-preview.2
+dsh plugin --profile headless add github:JoFe2/kaleidosphere-dsh-plugin#v0.1.0-preview.3
 dsh --profile headless --dump-config
 dsh --profile headless "Analyze the configured KaleidoSphere database and report its engine and snapshot digest."
 ```

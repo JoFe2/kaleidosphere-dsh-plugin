@@ -1,6 +1,6 @@
 {
   "name": "kaleidosphere-dsh-plugin",
-  "version": "0.1.0-preview.2",
+  "version": "0.1.0-preview.3",
   "description": "Native KaleidoSphere database-analysis tools for DeepSeek Harness",
   "type": "module",
   "main": "index.js",

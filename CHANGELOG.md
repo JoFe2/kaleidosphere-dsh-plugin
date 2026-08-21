@@ -6,6 +6,8 @@ Harness Developer Preview ABI changes.
 
 ## [Unreleased]
 
+## [0.1.0-preview.3] - 2026-08-21
+
 - Compile parameterized tool authoring schemas through DSH rc.8 `defineTool`,
   producing object-rooted model schemas and enforcing required arguments before
   KaleidoSphere runtime dispatch.
@@ -37,6 +39,7 @@ Harness Developer Preview ABI changes.
 - Add HMR unload/reload, remove/reinstall, invalid-configuration, package,
   provenance, and exact-rc.8 lifecycle verification.
 
-[Unreleased]: https://github.com/JoFe2/kaleidosphere-dsh-plugin/compare/v0.1.0-preview.2...HEAD
+[Unreleased]: https://github.com/JoFe2/kaleidosphere-dsh-plugin/compare/v0.1.0-preview.3...HEAD
+[0.1.0-preview.3]: https://github.com/JoFe2/kaleidosphere-dsh-plugin/compare/v0.1.0-preview.2...v0.1.0-preview.3
 [0.1.0-preview.2]: https://github.com/JoFe2/kaleidosphere-dsh-plugin/releases/tag/v0.1.0-preview.2
 [0.1.0-preview.1]: https://github.com/JoFe2/kaleidosphere-dsh-plugin/releases/tag/v0.1.0-preview.1
