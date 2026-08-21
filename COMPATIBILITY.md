@@ -1,5 +1,10 @@
 # Compatibility
 
+Parameterized tools are registered through the pinned rc.8 `defineTool` API.
+The plugin therefore relies on rc.8's authoring-schema compiler and argument
+validator rather than passing author-only property maps directly to the
+registry.
+
 This Preview intentionally supports a narrow, evidence-backed matrix. A version
 not listed as verified is not implied to work.
 

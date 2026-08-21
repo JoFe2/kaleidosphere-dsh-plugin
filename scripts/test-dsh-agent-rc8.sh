@@ -106,6 +106,16 @@ install_plugin malformed
 run_agent malformed malformed 'Create a KaleidoSphere plan for the configured database.'
 grep -Fq 'KS_AGENT_MALFORMED_REJECTED' "$evidence_dir/malformed.out"
 
+install_plugin parameterized
+for action in discovery plan preview; do
+  run_agent "parameterized-$action-happy" parameterized "Run the KaleidoSphere $action workflow."
+  grep -Fq "KS_AGENT_PARAMETERIZED_HAPPY $action" "$evidence_dir/parameterized-$action-happy.out"
+  run_agent "parameterized-$action-invalid" parameterized "Run the malformed KaleidoSphere $action negative probe."
+  grep -Fq "KS_AGENT_PARAMETERIZED_INVALID $action" "$evidence_dir/parameterized-$action-invalid.out"
+  grep -Fq 'invalid arguments:' "$evidence_dir/parameterized-$action-invalid.out"
+  ! grep -Fq 'EXTERNAL_BI_REQUEST_SURFACE_DENIED' "$evidence_dir/parameterized-$action-invalid.out"
+done
+
 install_plugin missing-live
 printf '%s\n' '- id: kaleidosphere-dsh-plugin' '  config:' '    source:' '      mode: live' \
   >"$(home_for missing-live)/profiles/headless/cordis.patch.yml"
@@ -157,8 +167,23 @@ assert(toolSteps('happy').length === 2 && toolSteps('happy').every(entry => Stri
   'happy tool results did not return through the agent loop')
 assert(firstSteps('malformed').length === 1 && exactTools(firstSteps('malformed')[0]),
   'malformed scenario did not advertise the six tools')
-assert(toolSteps('malformed').length === 1 && String(toolSteps('malformed')[0].toolResult).includes('EXTERNAL_BI_REQUEST_SURFACE_DENIED'),
+assert(toolSteps('malformed').length === 1 && String(toolSteps('malformed')[0].toolResult).includes('invalid arguments:'),
   'malformed tool arguments were not rejected by the tool layer')
+for (const action of ['discovery', 'plan', 'preview']) {
+  const happy = `parameterized-${action}-happy`
+  const invalid = `parameterized-${action}-invalid`
+  assert(firstSteps(happy).length === 1 && exactTools(firstSteps(happy)[0]), `${happy} did not expose six tools`)
+  assert(firstSteps(invalid).length === 1 && exactTools(firstSteps(invalid)[0]), `${invalid} did not expose six tools`)
+  const schema = firstSteps(happy)[0].ksToolSchemas.find(entry => entry.name === `kaleidosphere_${action}`)?.parameters
+  assert(schema?.type === 'object' && Array.isArray(schema.required) && schema.required.length > 0,
+    `${happy} did not expose an object-rooted required schema`)
+  assert(Object.values(schema.properties ?? {}).every(property => !Object.hasOwn(property, 'required') && property.type !== 'json'),
+    `${happy} leaked author-only schema fields`)
+  assert(toolSteps(happy).length === (action === 'discovery' ? 1 : 2), `${happy} tool sequence mismatch`)
+  assert(toolSteps(invalid).length === 1 && String(toolSteps(invalid)[0].toolResult).includes('invalid arguments:')
+    && !String(toolSteps(invalid)[0].toolResult).includes('EXTERNAL_BI_REQUEST_SURFACE_DENIED'),
+    `${invalid} did not fail at the DSH argument boundary`)
+}
 assert(byScenario('missing-live').length === 0,
   'missing live configuration reached the model despite load-time rejection')
 assert(log.every(entry => entry.authorizationPresent), 'stub request lacked the local bearer marker')
@@ -181,7 +206,8 @@ const summary = {
   negativeCases: {
     noPlugin: 'PASS',
     disabledPlugin: 'PASS',
-    malformedArguments: 'PASS',
+    malformedArguments: 'PASS_DSH_INVALID_ARGS',
+    parameterizedHappyNegative: 'PASS_DISCOVERY_PLAN_PREVIEW',
     missingLiveConfiguration: 'PASS_LOAD_TIME_REJECTION',
     cleanRemoval: 'PASS',
   },

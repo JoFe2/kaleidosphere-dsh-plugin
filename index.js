@@ -1,4 +1,5 @@
 import { createToolDefinitions, KaleidoSphereRuntime } from './lib/runtime.mjs'
+import { defineTool } from '@deepseek-ai/dsh-tools'
 
 export const name = 'kaleidosphere-dsh-plugin'
 export const inject = ['tools']
@@ -15,7 +16,7 @@ export const inject = ['tools']
 export async function apply(ctx, config = {}) {
   await ctx.effect(async () => {
     const runtime = await KaleidoSphereRuntime.create(config)
-    for (const definition of createToolDefinitions(runtime)) ctx.tools.register(definition)
+    for (const definition of createToolDefinitions(runtime)) ctx.tools.register(defineTool(definition))
     return async () => runtime.dispose()
   }, 'kaleidosphere-dsh-plugin: runtime and native tools')
 }
