@@ -3,7 +3,7 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 run_root="$(mktemp -d)"
-tools_root="${DSH_TOOLS_ROOT:-$run_root/tools}"
+tools_root="${DSH_TOOLS_ROOT:-$repo_root}"
 bin_root="$run_root/bin"
 homes_root="$run_root/homes"
 runtime_tmp="$run_root/runtime-tmp"
@@ -21,10 +21,16 @@ cleanup() {
 }
 trap cleanup EXIT
 
+wait_for_pid() {
+  local pid=$1 seconds=$2 label=$3
+  if ! timeout "$seconds" tail --pid="$pid" -f /dev/null; then
+    echo "timeout waiting for $label pid=$pid after ${seconds}s" >&2
+    return 124
+  fi
+  wait "$pid"
+}
+
 corepack enable --install-directory "$bin_root"
-if [[ -z "${DSH_TOOLS_ROOT:-}" ]]; then
-  npm install --prefix "$tools_root" --no-audit --no-fund @deepseek-ai/dsh@0.1.0-rc.8 >/dev/null
-fi
 node -e 'const p=require(process.argv[1]); if(p.version!=="0.1.0-rc.8") process.exit(1)' \
   "$tools_root/node_modules/@deepseek-ai/dsh/package.json"
 export PATH="$tools_root/node_modules/.bin:$bin_root:$PATH"
@@ -74,7 +80,7 @@ run_agent() {
   DSH_HOME="$(home_for "$home_key")" TMPDIR="$scenario_tmp" \
     DEEPSEEK_API_KEY='local-deterministic-stub' \
     DEEPSEEK_BASE_URL="$stub_url/$scenario" \
-    dsh --profile headless "$prompt" \
+    timeout "${DSH_AGENT_TIMEOUT_SECONDS:-90}" dsh --profile headless "$prompt" \
     >"$evidence_dir/$scenario.out" 2>"$evidence_dir/$scenario.err"
   [[ "$(find "$scenario_tmp" -maxdepth 1 -type d -name 'kaleidosphere-dsh-*' | wc -l)" -eq 0 ]]
 }
@@ -123,7 +129,7 @@ mkdir -p "$runtime_tmp/missing-live"
 if DSH_HOME="$(home_for missing-live)" TMPDIR="$runtime_tmp/missing-live" \
   DEEPSEEK_API_KEY='local-deterministic-stub' \
   DEEPSEEK_BASE_URL="$stub_url/missing-live" \
-  dsh --profile headless "$natural_prompt" \
+  timeout "${DSH_AGENT_TIMEOUT_SECONDS:-90}" dsh --profile headless "$natural_prompt" \
   >"$evidence_dir/missing-live.out" 2>"$evidence_dir/missing-live.err"; then
   echo 'missing live source configuration unexpectedly booted' >&2
   exit 1

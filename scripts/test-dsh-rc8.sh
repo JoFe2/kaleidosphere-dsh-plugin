@@ -3,7 +3,7 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 run_root="$(mktemp -d)"
-tools_root="${DSH_TOOLS_ROOT:-$run_root/tools}"
+tools_root="${DSH_TOOLS_ROOT:-$repo_root}"
 bin_root="$run_root/bin"
 dsh_home="$run_root/home"
 runtime_tmp="$run_root/runtime-tmp"
@@ -24,10 +24,16 @@ cleanup() {
 }
 trap cleanup EXIT
 
+wait_for_pid() {
+  local pid=$1 seconds=$2 label=$3
+  if ! timeout "$seconds" tail --pid="$pid" -f /dev/null; then
+    echo "timeout waiting for $label pid=$pid after ${seconds}s" >&2
+    return 124
+  fi
+  wait "$pid"
+}
+
 corepack enable --install-directory "$bin_root"
-if [[ -z "${DSH_TOOLS_ROOT:-}" ]]; then
-  npm install --prefix "$tools_root" --no-audit --no-fund @deepseek-ai/dsh@0.1.0-rc.8 >/dev/null
-fi
 node -e 'const p=require(process.argv[1]); if(p.version!=="0.1.0-rc.8") process.exit(1)' "$tools_root/node_modules/@deepseek-ai/dsh/package.json"
 export PATH="$tools_root/node_modules/.bin:$bin_root:$PATH"
 export DSH_HOME="$dsh_home"
@@ -107,7 +113,7 @@ wait_for_file "$KS_PROBE_UNLOADED"
 printf '[]\n' >"$profile_dir/cordis.patch.yml"
 : >"$KS_PROBE_RELOAD_REQUEST"
 wait_for_file "$KS_PROBE_RELOADED"
-wait "$dsh_pid"
+wait_for_pid "$dsh_pid" 90 dsh
 unset dsh_pid
 [[ -f "$KS_PROBE_DISPOSED" ]]
 [[ "$(find "$runtime_tmp" -maxdepth 1 -type d -name 'kaleidosphere-dsh-*' | wc -l)" -eq 0 ]]
@@ -127,7 +133,7 @@ export KS_PROBE_MODE=oneshot
 dsh --profile "$profile_name" >"$evidence_dir/dsh-reinstall.log" 2>&1 &
 dsh_pid=$!
 wait_for_file "$KS_PROBE_ACTIVE"
-wait "$dsh_pid"
+wait_for_pid "$dsh_pid" 90 dsh
 unset dsh_pid
 [[ -f "$KS_PROBE_DISPOSED" ]]
 [[ "$(find "$runtime_tmp" -maxdepth 1 -type d -name 'kaleidosphere-dsh-*' | wc -l)" -eq 0 ]]
@@ -167,7 +173,7 @@ export KS_PROBE_EXPECTED_TOOL_NAMES='kaleidosphere_status,kaleidosphere_discover
 dsh --profile "$toggled_profile" >"$evidence_dir/dsh-toggled.log" 2>&1 &
 dsh_pid=$!
 wait_for_file "$KS_PROBE_ACTIVE"
-wait "$dsh_pid"
+wait_for_pid "$dsh_pid" 90 dsh
 unset dsh_pid KS_PROBE_EXPECTED_TOOL_NAMES
 node -e 'const x=require(process.argv[1]); if(x.tools.length!==5||x.tools.includes("kaleidosphere_preview")||x.results.length!==0) process.exit(1)' "$KS_PROBE_ACTIVE"
 [[ -f "$KS_PROBE_DISPOSED" ]]
@@ -207,7 +213,7 @@ export KS_PROBE_EXPECTED_TOOL_NAMES='kaleidosphere_status'
 dsh --profile "$external_profile" >"$evidence_dir/dsh-external.log" 2>&1 &
 dsh_pid=$!
 wait_for_file "$KS_PROBE_ACTIVE"
-wait "$dsh_pid"
+wait_for_pid "$dsh_pid" 90 dsh
 unset dsh_pid KS_PROBE_EXPECTED_TOOL_NAMES
 node -e 'const x=require(process.argv[1]); if(x.tools.length!==1||x.results.length!==1||x.results[0].value?.response?.result?.status!=="EXTERNAL_STUB_READY") process.exit(1)' "$KS_PROBE_ACTIVE"
 [[ -f "$KS_PROBE_DISPOSED" ]]

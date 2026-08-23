@@ -55,5 +55,8 @@
     "kaleidosphere",
     "database-analysis",
     "ai-agents"
-  ]
+  ],
+  "devDependencies": {
+    "@deepseek-ai/dsh": "0.1.0-rc.8"
+  }
 }
