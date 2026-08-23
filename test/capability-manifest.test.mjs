@@ -74,6 +74,9 @@ function assertExactProjection(projection, source) {
   const body = Object.fromEntries(Object.entries(projection).filter(([key]) => key !== 'projectionDigest'))
   assert.equal(projection.projectionDigest, sha256Digest(body))
   assert(Object.isFrozen(projection))
+  assert(Object.isFrozen(projection.product))
+  assert(Object.isFrozen(projection.contract))
+  assert(Object.isFrozen(projection.freshness))
   assert(Object.isFrozen(projection.actions))
   assert(projection.actions.every((action) => Object.isFrozen(action)))
 }
@@ -134,6 +137,21 @@ test('tampered attestations are hidden', () => {
   denied(unsealedGraph, 'KS_DSH_MANIFEST_GRAPH_STALE')
   const unsealedRawRows = supplied((manifest) => { manifest.boundaries.rawSourceRowsReturned = true })
   denied(unsealedRawRows, 'KS_DSH_MANIFEST_BOUNDARIES_WIDENED')
+})
+
+test('a resealed reordered manifest is denied: the self-consistent digest must equal the pin', () => {
+  const reordered = resealed((manifest) => {
+    manifest.capabilities = manifest.capabilities.reverse()
+  })
+  assert.notEqual(reordered.attestation.digest, PINNED_EMBEDDED_DIGEST)
+  assert.equal(reordered.attestation.digest, sha256Digest(manifestBody(reordered)))
+  denied(reordered, 'KS_DSH_MANIFEST_DIGEST_STALE')
+  const swapped = resealed((manifest) => {
+    const [first, last] = [manifest.capabilities[0], manifest.capabilities[manifest.capabilities.length - 1]]
+    manifest.capabilities[0] = last
+    manifest.capabilities[manifest.capabilities.length - 1] = first
+  })
+  denied(swapped, 'KS_DSH_MANIFEST_DIGEST_STALE')
 })
 
 test('unknown and missing capabilities are hidden', () => {
