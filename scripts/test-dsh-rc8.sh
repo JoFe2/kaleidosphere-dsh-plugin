@@ -9,6 +9,7 @@ dsh_home="$run_root/home"
 runtime_tmp="$run_root/runtime-tmp"
 evidence_dir="${EVIDENCE_DIR:-$run_root/evidence}"
 advanced_features="${DSH_EXPECT_ADVANCED_FEATURES:-1}"
+file_timeout_steps="${DSH_FILE_TIMEOUT_STEPS:-1200}"
 profile_name=ks-e2e
 profile_dir="$dsh_home/profiles/$profile_name"
 mkdir -p "$bin_root" "$dsh_home" "$runtime_tmp" "$evidence_dir"
@@ -65,12 +66,13 @@ dsh_pid=$!
 
 wait_for_file() {
   local file=$1
-  for _ in $(seq 1 400); do
+  for _ in $(seq 1 "$file_timeout_steps"); do
     [[ -f "$KS_PROBE_FAILURE" ]] && { cat "$KS_PROBE_FAILURE" >&2; return 1; }
     [[ -f "$file" ]] && return 0
     sleep 0.05
   done
   echo "timeout waiting for $file" >&2
+  [[ -f "$evidence_dir/dsh.log" ]] && tail -100 "$evidence_dir/dsh.log" >&2
   return 1
 }
 
