@@ -10,6 +10,7 @@ runtime_tmp="$run_root/runtime-tmp"
 evidence_dir="${EVIDENCE_DIR:-$run_root/evidence}"
 expected_plugin_sha="${EXPECTED_PLUGIN_SHA256:-}"
 plugin_artifact_label="${PLUGIN_ARTIFACT_LABEL:-local-candidate}"
+file_timeout_steps="${DSH_FILE_TIMEOUT_STEPS:-1200}"
 mkdir -p "$bin_root" "$homes_root" "$runtime_tmp" "$evidence_dir"
 
 cleanup() {
@@ -53,7 +54,7 @@ stub_log="$evidence_dir/model-stub-requests.jsonl"
 node "$repo_root/scripts/dsh-agent-stub.mjs" --ready "$stub_ready" --log "$stub_log" \
   >"$evidence_dir/model-stub.stdout.log" 2>"$evidence_dir/model-stub.stderr.log" &
 stub_pid=$!
-for _ in $(seq 1 200); do
+for _ in $(seq 1 "$file_timeout_steps"); do
   [[ -f "$stub_ready" ]] && break
   kill -0 "$stub_pid" 2>/dev/null || { echo 'model stub stopped before readiness' >&2; exit 1; }
   sleep 0.05

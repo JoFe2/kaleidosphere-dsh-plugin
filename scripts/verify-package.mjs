@@ -6,7 +6,7 @@ import path from 'node:path'
 
 const root = path.resolve(import.meta.dirname, '..')
 const manifest = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8'))
-assert.equal(manifest.version, '0.1.0-preview.3')
+assert.equal(manifest.version, '0.1.0-preview.4')
 assert.equal(manifest.dsh.bundle.patch, './cordis.patch.yml')
 assert.equal(manifest.scripts.prepare, undefined)
 assert.equal(manifest.license, 'Apache-2.0')
