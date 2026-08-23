@@ -28,7 +28,7 @@ test('fixture executes all six released intents through External API v2 and K1',
     const status = await runtime.execute('status')
     assert.equal(status.response.action, 'status')
     assert.equal(status.response.result.status, 'READY')
-    assert.equal(status.response.result.pluginVersion, '0.1.0-preview.2')
+    assert.equal(status.response.result.pluginVersion, '0.1.0-preview.4')
 
     const analyze = await runtime.execute('analyze')
     assert.equal(analyze.response.action, 'analyze')

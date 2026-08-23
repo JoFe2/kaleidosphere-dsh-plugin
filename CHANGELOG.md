@@ -6,6 +6,15 @@ Harness Developer Preview ABI changes.
 
 ## [Unreleased]
 
+## [0.1.0-preview.4] - 2026-08-23
+
+- Bind runtime tool exposure to the pinned EMBEDDED or validated EXTERNAL
+  capability source and its closed six-tool registration plan.
+- Deny stale, tampered, substituted, widened, reordered, or re-digested
+  capability evidence before any tool is exposed; never fall back implicitly.
+- Pin the exact DSH rc.8 dependency graph and bound all exact-host and Agent
+  E2E waits so CI fails closed instead of hanging during dynamic resolution.
+
 ## [0.1.0-preview.3] - 2026-08-21
 
 - Compile parameterized tool authoring schemas through DSH rc.8 `defineTool`,
@@ -39,7 +48,8 @@ Harness Developer Preview ABI changes.
 - Add HMR unload/reload, remove/reinstall, invalid-configuration, package,
   provenance, and exact-rc.8 lifecycle verification.
 
-[Unreleased]: https://github.com/JoFe2/kaleidosphere-dsh-plugin/compare/v0.1.0-preview.3...HEAD
+[Unreleased]: https://github.com/JoFe2/kaleidosphere-dsh-plugin/compare/v0.1.0-preview.4...HEAD
+[0.1.0-preview.4]: https://github.com/JoFe2/kaleidosphere-dsh-plugin/compare/v0.1.0-preview.3...v0.1.0-preview.4
 [0.1.0-preview.3]: https://github.com/JoFe2/kaleidosphere-dsh-plugin/compare/v0.1.0-preview.2...v0.1.0-preview.3
 [0.1.0-preview.2]: https://github.com/JoFe2/kaleidosphere-dsh-plugin/releases/tag/v0.1.0-preview.2
 [0.1.0-preview.1]: https://github.com/JoFe2/kaleidosphere-dsh-plugin/releases/tag/v0.1.0-preview.1
