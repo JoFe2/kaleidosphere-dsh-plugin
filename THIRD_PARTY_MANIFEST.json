@@ -20,10 +20,11 @@
       "license": "Apache-2.0",
       "selectedLicense": "Apache-2.0",
       "root": "vendor/kaleidosphere-v0.24.0",
-      "fileCount": 15,
+      "fileCount": 16,
       "digestAlgorithm": "sha256(relative-path NUL content NUL, lexicographic paths)",
-      "digest": "1358235bf4144f5d3f3492823f611d09ebe7051e92805a58784f934dd4f01c74",
+      "digest": "2eb277886ab2abcb5cd0513da16bd72fa88f4d85a220e83d6665785830da0444",
       "files": [
+        "services/bi-agent/package.json",
         "services/bi-agent/src/database-overview-handler-v1.mjs",
         "services/bi-agent/src/external-api-v2.mjs",
         "services/bi-agent/src/object-capability-contract-v1.mjs",
