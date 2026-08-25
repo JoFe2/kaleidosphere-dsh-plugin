@@ -1034,11 +1034,11 @@ test('P2B2B: runtime Search dispatches locally to the pinned handler, preserving
     const tools = createToolDefinitions(runtime)
     assert.equal(tools.length, 6)
     assert(tools.every(tool => tool.capability.action !== 'search'))
-    // P2B3B supersedes the Details half of this check: Details is now a known
-    // local action and denies an empty dispatch envelope with its own input
-    // code; Overview remains an unknown action.
+    // P2B3B supersedes the Details half and P2B4B the Overview half of this
+    // check: both are now known local actions and deny an empty dispatch
+    // envelope with their own input codes.
     await assert.rejects(runtime.execute('details'), /KS_DSH_DETAILS_INPUT_INVALID/)
-    await assert.rejects(runtime.execute('overview'), /KS_DSH_ACTION_INVALID/)
+    await assert.rejects(runtime.execute('overview'), /KS_DSH_OVERVIEW_INPUT_INVALID/)
   } finally {
     await runtime.dispose()
   }
@@ -1491,7 +1491,10 @@ test('P2B3B: runtime Details dispatches locally to the pinned two-argument handl
     const tools = createToolDefinitions(runtime)
     assert.equal(tools.length, 6)
     assert(tools.every(tool => tool.capability.action !== 'details'))
-    await assert.rejects(runtime.execute('overview'), /KS_DSH_ACTION_INVALID/)
+    // P2B4B supersedes the Overview half of this check: Overview is now a
+    // known local action and denies an empty dispatch envelope with its own
+    // input code.
+    await assert.rejects(runtime.execute('overview'), /KS_DSH_OVERVIEW_INPUT_INVALID/)
   } finally {
     await runtime.dispose()
   }
@@ -1612,10 +1615,10 @@ test('P2B3B: external runtime mode denies Details locally and never sends it to 
 // buildDatabaseOverviewProjection, the receipt chain is recomputed from the
 // sealed receipts following the pinned chain rule, and the cancellation
 // digest is the pinned identity hash over the receipt chain and the
-// projection's cancellation state. This leaf adds no runtime dispatch: the
-// Overview path is unreachable from KaleidoSphereRuntime, and the pinned
-// contract marks object capabilities a separate-versioned extension with
-// handlerDispatchIncluded false.
+// projection's cancellation state. The P2B4A leaf itself adds no runtime
+// dispatch (the additive local dispatch is added by P2B4B below), and the
+// pinned contract marks object capabilities a separate-versioned extension
+// with handlerDispatchIncluded false.
 const OVERVIEW_ENGINES = ['mssql', 'oracle']
 const OVERVIEW_INPUT_INVALID = 'DB_OVERVIEW_HANDLER_INPUT_INVALID'
 const OVERVIEW_AUTHORITY_CLAIM_DENIED = 'DB_OVERVIEW_HANDLER_AUTHORITY_CLAIM_DENIED'
@@ -1739,13 +1742,14 @@ test('P2B4A: the pinned handler and contract expose the closed read-only Overvie
   assert.equal(contract.boundaries.freeSqlAccepted, false)
   assert.equal(contract.boundaries.rawRowsAccepted, false)
   assert.equal(contract.boundaries.mutationAuthority, false)
-  // P2B4A-NO-RUNTIME: the local runtime adds no Overview dispatch or
-  // authority in this leaf: 'overview' is not an action of the six-intent
-  // closed surface and no exposed tool name carries Overview.
+  // P2B4B supersedes the no-dispatch half of this check: Overview is now a
+  // known local action and denies an empty dispatch envelope with its own
+  // input code; the six-intent closed surface and the six-tool surface
+  // remain unchanged (no Overview tool name).
   const runtime = await KaleidoSphereRuntime.create()
   try {
     await assert.rejects(runtime.execute('overview', {}),
-      { code: 'KS_DSH_ACTION_INVALID', message: 'KS_DSH_ACTION_INVALID' })
+      { code: 'KS_DSH_OVERVIEW_INPUT_INVALID', message: 'KS_DSH_OVERVIEW_INPUT_INVALID' })
     const toolNames = createToolDefinitions(runtime).map((tool) => tool.name)
     assert.ok(toolNames.every((name) => !name.includes('overview')), 'no Overview tool surface')
     assert.deepEqual([...toolNames].sort(), [...CLOSED_INTENTS.map((action) => TOOL_NAMES[action])].sort())
@@ -2092,3 +2096,211 @@ function syntheticOverviewScenario(engine, {withCancelledReceipt = true} = {}) {
   }
   return {run, projection, bindings, request}
 }
+
+// P2B4B: focused oracle for runtime Overview dispatch. Reuses the verified
+// P2B4A synthetic Overview fixture/oracle: the runtime dispatches Overview
+// locally to the pinned vendored handleDatabaseOverviewRequestV1 (v0.24.0
+// closure, source commit e092bb0), passes the sealed {request, run} envelope
+// through untouched (the pinned handler is the single authority for
+// malformed or authority-bearing input — including the requirement that the
+// run be deeply frozen — and re-derives every binding from its recomputed
+// projection), and seals the frozen PROJECTED_READ_ONLY result in a v2
+// result envelope. Overview is additive and local only: the six v0.16 paths
+// and the six-tool surface are untouched, Overview is never sent to the
+// shared external API, is never exposed as a native tool, and no
+// credential/raw-row/SQL/network/mutation surface is added. The sealed
+// handler result (all claims and authority false) is the evidence.
+const OVERVIEW_EXTERNAL_DENIED = 'KS_DSH_OVERVIEW_EXTERNAL_DENIED'
+const OVERVIEW_DISPATCH_INPUT_INVALID = 'KS_DSH_OVERVIEW_INPUT_INVALID'
+const OVERVIEW_RESPONSE_KEYS = Object.freeze([
+  'schemaVersion', 'requestId', 'action', 'runtime', 'capabilityAttestationDigest', 'result', 'integrity',
+])
+
+test('P2B4B: runtime Overview dispatches locally to the pinned handler, preserving exact Overview bindings and the sealed result (mssql and oracle, with and without a cancelled receipt)', async () => {
+  const runtime = await KaleidoSphereRuntime.create({ source: { mode: 'fixture' } })
+  try {
+    for (const engine of OVERVIEW_ENGINES) {
+      for (const withCancelledReceipt of [true, false]) {
+        const scenario = syntheticOverviewScenario(engine, {withCancelledReceipt})
+        const value = { request: scenario.request, run: deepFreezeValue(scenario.run) }
+        const direct = handleDatabaseOverviewRequestV1(scenario.request, value.run)
+        const out = await runtime.execute('overview', value)
+        // Pass-through to the pinned handler: the sealed result is returned
+        // unaltered (byte-identical to a direct dispatch) and re-validated
+        // through the vendored capability contract.
+        assert.deepEqual(out.response.result, direct)
+        assert.equal(canonicalJson(out.response.result), canonicalJson(handleDatabaseOverviewRequestV1(scenario.request, value.run)))
+        const validated = buildObjectCapabilityContractV1().validateResult(out.response.result.envelope, {
+          capabilityId: out.response.result.capabilityId,
+          requestSha256: out.response.result.requestSha256,
+          projectionSha256: out.response.result.projectionSha256,
+          bindings: scenario.bindings,
+        })
+        assert.deepEqual(validated, out.response.result.envelope)
+        // Preserves the exact Overview bindings: the snapshot, coverage,
+        // receipt-chain and cancellation digests pass through unchanged from
+        // the independently derived fixture bindings.
+        assert.deepEqual(out.response.result.envelope.bindings, scenario.bindings)
+        assert.equal(out.response.result.envelope.bindings.snapshotSha256, scenario.projection.bindings.inventorySnapshotSha256)
+        assert.equal(out.response.result.envelope.bindings.coverageSha256, scenario.projection.bindings.coverageSha256)
+        assert.equal(out.response.result.envelope.bindings.receiptChainSha256, scenario.projection.bindings.receiptChainSha256)
+        assert.equal(out.response.result.projectionSha256, scenario.projection.projectionSha256)
+        // Sealed, deeply frozen v2 result envelope around the pinned result.
+        assertFrozen(out.response)
+        assert.deepEqual(Object.keys(out.response), OVERVIEW_RESPONSE_KEYS)
+        assert.equal(out.response.schemaVersion, SEARCH_RESULT_SCHEMA)
+        assert.equal(out.response.action, 'overview')
+        assert.equal(out.response.requestId, `ks-overview-${sha256Digest({ action: 'overview', input: value }).slice(7, 31)}`)
+        const attestation = capabilityAttestationV2()
+        assert.deepEqual(out.response.runtime, { product: attestation.product, contract: attestation.contract })
+        assert.equal(out.response.capabilityAttestationDigest, attestation.attestation.digest)
+        assert.equal(out.response.integrity.algorithm, 'sha256-canonical-json')
+        assert.match(out.response.integrity.digest, /^sha256:[a-f0-9]{64}$/)
+        const { integrity, ...body } = out.response
+        assert.equal(sha256Digest(body), out.response.integrity.digest)
+        // No authority: the pinned claims and authority surface stays all false.
+        assert.deepEqual(out.response.result.envelope.claims, OVERVIEW_CLAIMS)
+        assert.deepEqual(out.response.result.envelope.authority, OVERVIEW_AUTHORITY)
+        // Dispatch is deterministic: a repeated dispatch seals an identical envelope.
+        const repeated = await runtime.execute('overview', value)
+        assert.equal(canonicalJson(repeated.response), canonicalJson(out.response))
+      }
+    }
+    // Additive: the six closed v0.16 paths, the six-tool surface and the
+    // P2B2B Search / P2B3B Details dispatches are untouched on the same
+    // runtime.
+    const status = await runtime.execute('status')
+    assert.equal(status.response.result.status, 'READY')
+    assert.equal(status.evidence.status, 'succeeded')
+    const analyze = await runtime.execute('analyze')
+    assert.equal(analyze.response.result.evidence.snapshotSha256,
+      '293a896156d8f6269c4ad33e8d632da653ea180d35a4ea5f390b0be52ce3e44a')
+    const discovery = await runtime.execute('discovery', { command: 'start', sessionId: 'p2b4b-1' })
+    assert.equal(discovery.response.result.status, 'IN_PROGRESS')
+    const plan = await runtime.execute('plan', { objective: 'Review weekly order value' })
+    assert.equal(plan.response.result.authority.proposalOnly, true)
+    const preview = await runtime.execute('preview', { objective: 'Preview weekly order value' })
+    assert.deepEqual(preview.response.result.relations, ['dbo.customers', 'dbo.orders'])
+    const readback = await runtime.execute('readback')
+    assert.equal(readback.response.result.catalog.coverageComplete, true)
+    const { sources: searchSources, envelope: searchEnvelope } = syntheticSearchFixture('mssql')
+    const searchValue = validSearchHandlerInput({ engine: 'mssql', sources: searchSources, envelope: searchEnvelope })
+    const searchOut = await runtime.execute('search', searchValue)
+    assert.equal(canonicalJson(searchOut.response.result), canonicalJson(handleObjectSearchV1(searchValue)))
+    const detailsScenario = syntheticDetailsScenario('mssql', DETAILS_STATES.COMPLETE)
+    const detailsValue = { request: detailsScenario.request, projectionInput: detailsScenario.projectionInput }
+    const detailsOut = await runtime.execute('details', detailsValue)
+    assert.equal(canonicalJson(detailsOut.response.result), canonicalJson(handleObjectDetailsV1(detailsScenario.request, detailsScenario.projectionInput)))
+    const tools = createToolDefinitions(runtime)
+    assert.equal(tools.length, 6)
+    assert(tools.every(tool => tool.capability.action !== 'overview'))
+    // P2B4B supersedes the previous no-dispatch checks: Overview is now a
+    // known local action and denies an empty dispatch envelope with its own
+    // input code (the six-intent closed surface itself is unchanged).
+    await assert.rejects(runtime.execute('overview'), /KS_DSH_OVERVIEW_INPUT_INVALID/)
+  } finally {
+    await runtime.dispose()
+  }
+})
+
+test('P2B4B: malformed envelope and authority-bearing Overview input deny through the runtime with pinned codes', async () => {
+  const runtime = await KaleidoSphereRuntime.create({ source: { mode: 'fixture' } })
+  try {
+    const { request, run, bindings } = syntheticOverviewScenario('mssql', {withCancelledReceipt: true})
+    const frozenRun = deepFreezeValue(structuredClone(run))
+    const value = { request, run: frozenRun }
+    const stale = syntheticOverviewScenario('mssql', {withCancelledReceipt: false})
+    const cases = [
+      // Envelope-level malformation never reaches the pinned handler.
+      [{}, OVERVIEW_DISPATCH_INPUT_INVALID],
+      [null, OVERVIEW_DISPATCH_INPUT_INVALID],
+      [[request, run], OVERVIEW_DISPATCH_INPUT_INVALID],
+      [{ request }, OVERVIEW_DISPATCH_INPUT_INVALID],
+      [{ run: frozenRun }, OVERVIEW_DISPATCH_INPUT_INVALID],
+      [{ ...value, sql: 'SELECT 1' }, OVERVIEW_DISPATCH_INPUT_INVALID],
+      [{ ...value, credentials: 'secret' }, OVERVIEW_DISPATCH_INPUT_INVALID],
+      [{ ...value, callback: 'https://evil.invalid' }, OVERVIEW_DISPATCH_INPUT_INVALID],
+      // Request-level content denies with the pinned handler codes.
+      [{ ...value, request: null }, OVERVIEW_REQUEST_SURFACE_DENIED],
+      [{ ...value, request: { ...request, sql: 'SELECT 1' } }, OVERVIEW_REQUEST_SURFACE_DENIED],
+      [{ ...value, request: { ...request, credentials: 'secret' } }, OVERVIEW_REQUEST_SURFACE_DENIED],
+      [{ ...value, request: { ...request, rawRows: [] } }, OVERVIEW_REQUEST_SURFACE_DENIED],
+      [{ ...value, request: { ...request, capabilityId: 'bi.object.details.read' } }, OVERVIEW_REQUEST_IDENTITY_DENIED],
+      [{ ...value, request: { ...request, scope: { schemas: ['other'] } } }, OVERVIEW_SCOPE_DENIED],
+      [{ ...value, request: { ...request, scope: { schemas: ['../escape'] } } }, OVERVIEW_SCOPE_DENIED],
+      [{ ...value, request: { ...request, bindings: { ...bindings, engine: 'postgres' } } }, OVERVIEW_BINDING_DENIED],
+      [{ ...value, request: { ...request, bindings: { ...bindings, dispatchAuthority: true } } }, OVERVIEW_BINDING_DENIED],
+      [{ ...value, request: { ...request, bindings: { ...bindings, executionAuthority: true } } }, OVERVIEW_BINDING_DENIED],
+      [{ ...value, request: { ...request, bindings: { ...bindings, sqlAuthority: true } } }, OVERVIEW_BINDING_DENIED],
+      [{ ...value, request: { ...request, bindings: { ...bindings, claims: { completenessClaimed: true } } } }, OVERVIEW_BINDING_DENIED],
+      ...Object.keys(bindings).filter((key) => key !== 'engine').map((key) => [
+        { ...value, request: { ...request, bindings: { ...bindings, [key]: hash64('0') } } },
+        OVERVIEW_BINDING_DENIED,
+      ]),
+      // Stale request: same capability and scope but bindings derived from a
+      // different run.
+      [{ ...value, request: stale.request }, OVERVIEW_BINDING_DENIED],
+      // Hidden and symbol request surfaces deny before any trap executes.
+      [{ ...value, request: (hidden => { const copy = structuredClone(request); Object.defineProperty(copy, 'credentials', { value: 'secret', enumerable: false }); return copy })() }, OVERVIEW_REQUEST_SURFACE_DENIED],
+      [{ ...value, request: (symbol => { const copy = structuredClone(request); copy[Symbol('secret')] = 'hidden'; return copy })() }, OVERVIEW_REQUEST_SURFACE_DENIED],
+      // Run-level content denies with the pinned handler codes: the pinned
+      // handler is the single authority and requires a deeply frozen run.
+      // (A null run is not pinned: the pinned closure's data-tree and
+      // deep-freeze checks both pass null through, so the handler denies it
+      // with a raw TypeError at Object.hasOwn before any pinned code —
+      // still fail-closed: no projection, no result, no dispatch.)
+      [{ ...value, run: structuredClone(run) }, 'DB_OVERVIEW_HANDLER_INPUT_INVALID'],
+      [{ ...value, run: deepFreezeValue({ ...structuredClone(run), authority: { sqlAuthority: 'ALL' } }) }, 'DB_OVERVIEW_HANDLER_AUTHORITY_CLAIM_DENIED'],
+      [{ ...value, run: deepFreezeValue({ ...structuredClone(run), claims: { completenessClaimed: true } }) }, 'DB_OVERVIEW_HANDLER_AUTHORITY_CLAIM_DENIED'],
+      // Broken run seal: the body changed but the pinned stateSha256 did not.
+      [{ ...value, run: deepFreezeValue({ ...structuredClone(run), scope: { ...run.scope, schemas: ['other'] } }) }, 'DB_OVERVIEW_RUN_TAMPERED'],
+    ]
+    for (const [input, code] of cases) {
+      await assert.rejects(runtime.execute('overview', input), { code, message: code })
+    }
+    // A Proxy run denies before any trap executes.
+    let traps = 0
+    const proxyRun = new Proxy(structuredClone(run), { getPrototypeOf() { traps += 1; return Object.prototype; } })
+    await assert.rejects(runtime.execute('overview', { ...value, run: proxyRun }),
+      { code: 'DB_OVERVIEW_HANDLER_INPUT_INVALID', message: 'DB_OVERVIEW_HANDLER_INPUT_INVALID' })
+    assert.equal(traps, 0)
+    // Denial is fail closed: a denied Overview leaves no result and the runtime stays usable.
+    const after = await runtime.execute('overview', value)
+    assert.equal(canonicalJson(after.response.result), canonicalJson(handleDatabaseOverviewRequestV1(request, frozenRun)))
+  } finally {
+    await runtime.dispose()
+  }
+})
+
+test('P2B4B: external runtime mode denies Overview locally and never sends it to the shared external API', async () => {
+  const requests = []
+  const server = createServer((request, response) => {
+    requests.push({ method: request.method, url: request.url })
+    if (request.method === 'GET' && request.url === '/v2/capabilities') {
+      response.writeHead(200, { 'content-type': 'application/json' })
+      response.end(JSON.stringify(capabilityAttestationV2()))
+      return
+    }
+    response.writeHead(404).end()
+  })
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
+  const address = server.address()
+  assert(address && typeof address !== 'string')
+  const scenario = syntheticOverviewScenario('mssql', {withCancelledReceipt: true})
+  const value = { request: scenario.request, run: deepFreezeValue(scenario.run) }
+  const runtime = await KaleidoSphereRuntime.create({
+    runtimeMode: 'external',
+    external: { baseUrl: `http://127.0.0.1:${address.port}` },
+  })
+  try {
+    // Overview is local only: it is outside the v0.16 closed intent set and
+    // must deny before any request leaves the process.
+    await assert.rejects(runtime.execute('overview', value),
+      { code: OVERVIEW_EXTERNAL_DENIED, message: OVERVIEW_EXTERNAL_DENIED })
+    // Only the create-time attestation fetch touched the network; Overview never did.
+    assert.deepEqual(requests, [{ method: 'GET', url: '/v2/capabilities' }])
+  } finally {
+    await runtime.dispose()
+    await new Promise(resolve => server.close(resolve))
+  }
+})
