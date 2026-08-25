@@ -15,11 +15,17 @@
     "commit": "e092bb0bce039936b88329793b24e9f987ae0ddb",
     "license": "Apache-2.0",
     "root": "vendor/kaleidosphere-v0.24.0",
-    "referenceManifestSha256": "2b82ed4ebcfa03b5470fb9583ea98dda991890a6dc6b98b3de2ee4d1455bdd2b",
-    "fileCount": 15,
+    "referenceManifestSha256": "3806d71aa99fbe6880464ce35677d88799302530fadf98f87fd5a55ad06dc1c7",
+    "fileCount": 16,
     "digestAlgorithm": "sha256(relative-path NUL content NUL, lexicographic paths)",
-    "digest": "1358235bf4144f5d3f3492823f611d09ebe7051e92805a58784f934dd4f01c74",
+    "digest": "2eb277886ab2abcb5cd0513da16bd72fa88f4d85a220e83d6665785830da0444",
     "files": [
+      {
+        "sourceCommit": "e092bb0bce039936b88329793b24e9f987ae0ddb",
+        "sourcePath": "services/bi-agent/package.json",
+        "vendorPath": "vendor/kaleidosphere-v0.24.0/services/bi-agent/package.json",
+        "sha256": "826bcc27fa1a59514001b550a8d07c2fd129bf68089ddc98bdf626b2eb346145"
+      },
       {
         "sourceCommit": "e092bb0bce039936b88329793b24e9f987ae0ddb",
         "sourcePath": "services/bi-agent/src/database-overview-handler-v1.mjs",
