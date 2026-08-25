@@ -19,6 +19,45 @@ import {
   buildRegistrationPlan,
   STABLE_TOOL_NAMES,
 } from '../lib/capability-registration-plan.mjs'
+import {
+  buildObjectSearchAuthorityBoundResult,
+  continueObjectSearchAuthorityBoundResult,
+} from '../vendor/kaleidosphere-v0.24.0/services/bi-control/src/db-analyzer/object-search-authority-bound-result-v1.mjs'
+import {
+  createObjectInventorySnapshot,
+  createObjectSearchCoverageBinding,
+  createObjectSearchEnvelope,
+} from '../vendor/kaleidosphere-v0.24.0/services/bi-control/src/db-analyzer/object-search-envelope-v1.mjs'
+import {
+  canonicalJson,
+  identitySha256,
+  normalizeJsonValue,
+  buildPreflightEvidence,
+} from '../vendor/kaleidosphere-v0.24.0/services/bi-control/src/db-analyzer/core.mjs'
+import {
+  buildObjectNameAuthority,
+} from '../vendor/kaleidosphere-v0.24.0/services/bi-control/src/db-analyzer/object-name-authority-v1.mjs'
+import {
+  buildObjectRelationKindAuthority,
+} from '../vendor/kaleidosphere-v0.24.0/services/bi-control/src/db-analyzer/object-relation-kind-authority-v1.mjs'
+import {
+  buildObjectInventoryAuthorityDigest,
+} from '../vendor/kaleidosphere-v0.24.0/services/bi-control/src/db-analyzer/object-inventory-authority-digest-v1.mjs'
+import {
+  buildProgressiveCoverage,
+  buildProgressiveMethodRegistry,
+  createProgressiveCoverage,
+  createProgressiveRun,
+} from '../vendor/kaleidosphere-v0.24.0/services/bi-control/src/db-analyzer/progressive-controller.mjs'
+import {
+  KS_OBJECT_CAPABILITY_REQUEST_SCHEMA,
+  KS_OBJECT_CAPABILITY_RESULT_SCHEMA,
+  buildObjectCapabilityContractV1,
+} from '../vendor/kaleidosphere-v0.24.0/services/bi-agent/src/object-capability-contract-v1.mjs'
+import {
+  KS_OBJECT_SEARCH_HANDLER_CAPABILITY_ID,
+  handleObjectSearchV1,
+} from '../vendor/kaleidosphere-v0.24.0/services/bi-agent/src/object-search-handler-v1.mjs'
 
 const expectedDigests = JSON.parse(await readFile(new URL('./expected-fixture-digests.json', import.meta.url), 'utf8'))
 
@@ -527,3 +566,373 @@ test('external runtime mode keeps the attested v2 fetch and binds the plan by ca
     await new Promise(resolve => server.close(resolve))
   }
 })
+
+// P2B2A: reusable fully synthetic direct Search-handler fixture and focused
+// happy/negative oracle against the pinned vendored handleObjectSearchV1
+// (v0.24.0 closure, source commit e092bb0), derived from the upstream reference
+// test object-search-handler-v1.test.mjs. The fixture is self-contained: the
+// structure manifest, SQL templates, result sets and profile context are built
+// inline, so there are no query-pack/profile data-file reads, environment
+// credentials, network access, or production edits. The only filesystem access
+// in the handler import chain is the vendored external-api-v2.mjs reading its
+// own co-located services/bi-agent/package.json (one of the 16 pinned closure
+// files).
+const SEARCH_CAPABILITY_ID = KS_OBJECT_SEARCH_HANDLER_CAPABILITY_ID
+const SEARCH_OTHER_CAPABILITY_ID = 'bi.object.details.read'
+const FORGED_PROJECTION = 'KS_OBJECT_SEARCH_HANDLER_PROJECTION_FORGED'
+const HANDLER_INPUT_INVALID = 'KS_OBJECT_SEARCH_HANDLER_INPUT_INVALID'
+const CAPABILITY_MISMATCH = 'KS_OBJECT_SEARCH_HANDLER_CAPABILITY_MISMATCH'
+const PINNED_SEARCH_CLAIMS = Object.freeze({
+  absenceClaimed: false, completenessClaimed: false, replayPreventionClaimed: false, sourceRowsIncluded: false,
+})
+const PINNED_SEARCH_AUTHORITY = Object.freeze({
+  credentialsIncluded: false, dispatchAuthority: false, executionAuthority: false,
+  mutationAuthority: false, queryExecution: false, rawValuesIncluded: false, sqlAuthority: false,
+})
+const hash64 = (character) => character.repeat(64)
+const assertFrozen = (value) => {
+  if (!value || typeof value !== 'object') return
+  assert(Object.isFrozen(value))
+  Object.values(value).forEach(assertFrozen)
+}
+
+test('P2B2A: vendored handleObjectSearchV1 returns a deterministic deeply frozen read-only envelope bound to the canonical request and projection digests (mssql and oracle first page)', () => {
+  for (const engine of ['mssql', 'oracle']) {
+    const { sources, envelope } = syntheticSearchFixture(engine)
+    const value = validSearchHandlerInput({ engine, sources, envelope })
+    const first = handleObjectSearchV1(value)
+    const repeated = handleObjectSearchV1({
+      request: { ...value.request, bindings: { ...value.request.bindings }, scope: { ...value.request.scope, schemas: [...value.request.scope.schemas] } },
+      projection: value.projection,
+      projectionInput: value.projectionInput,
+    })
+    assert.equal(first.schemaVersion, KS_OBJECT_CAPABILITY_RESULT_SCHEMA)
+    assert.equal(first.capabilityId, SEARCH_CAPABILITY_ID)
+    assert.equal(first.state, 'PROJECTED_READ_ONLY')
+    assert.equal(first.requestSha256, identitySha256(value.request))
+    assert.equal(first.projectionSha256, value.projection.projectionSha256)
+    assert.deepEqual(first.bindings, value.request.bindings)
+    assert.notEqual(first.bindings, value.request.bindings)
+    assert.deepEqual(first.claims, PINNED_SEARCH_CLAIMS)
+    assert.deepEqual(first.authority, PINNED_SEARCH_AUTHORITY)
+    assertFrozen(first)
+    assert.throws(() => { first.state = 'MUTATED' }, TypeError)
+    assert.equal(canonicalJson(first), canonicalJson(repeated))
+    const validated = buildObjectCapabilityContractV1().validateResult(first, {
+      capabilityId: SEARCH_CAPABILITY_ID,
+      requestSha256: first.requestSha256,
+      projectionSha256: first.projectionSha256,
+      bindings: value.request.bindings,
+    })
+    assert.deepEqual(validated, first)
+    assert.notEqual(validated, first)
+    assertFrozen(validated)
+  }
+})
+
+test('P2B2A: vendored handleObjectSearchV1 continuation inputs are deterministic and bound to the first-page cursor (mssql and oracle)', () => {
+  for (const engine of ['mssql', 'oracle']) {
+    const { sources, envelope } = syntheticSearchFixture(engine)
+    const firstPage = buildObjectSearchAuthorityBoundResult({ ...sources, request: envelope })
+    assert(firstPage.nextCursor)
+    const value = validSearchHandlerInput({ engine, sources, envelope, cursor: firstPage.nextCursor })
+    assert.equal(value.projection.page.pageIndex, 1)
+    assert.equal(value.projection.nextCursor, null)
+    const first = handleObjectSearchV1(value)
+    const repeated = handleObjectSearchV1(value)
+    assert.equal(first.schemaVersion, KS_OBJECT_CAPABILITY_RESULT_SCHEMA)
+    assert.equal(first.state, 'PROJECTED_READ_ONLY')
+    assert.equal(first.requestSha256, identitySha256(value.request))
+    assert.equal(first.projectionSha256, value.projection.projectionSha256)
+    assertFrozen(first)
+    assert.equal(canonicalJson(first), canonicalJson(repeated))
+  }
+})
+
+test('P2B2A: capability mismatch, request surface, binding drift and scope denials carry pinned codes', () => {
+  const { sources, envelope } = syntheticSearchFixture('mssql')
+  const value = validSearchHandlerInput({ engine: 'mssql', sources, envelope })
+  const bindings = value.request.bindings
+  const closed = (capabilityId, requestBindings, schemas) => ({
+    schemaVersion: KS_OBJECT_CAPABILITY_REQUEST_SCHEMA,
+    requestId: `handler-${capabilityId.split('.').pop()}`,
+    capabilityId,
+    bindings: requestBindings,
+    scope: { schemas },
+  })
+  const cases = [
+    [{ ...value, request: closed(SEARCH_OTHER_CAPABILITY_ID, bindings, value.request.scope.schemas) }, CAPABILITY_MISMATCH],
+    [{ ...value, request: { ...closed(SEARCH_CAPABILITY_ID, bindings, value.request.scope.schemas), sql: 'SELECT 1' } }, 'KS_OBJECT_CAPABILITY_REQUEST_SURFACE_DENIED'],
+    [{ ...value, request: { ...closed(SEARCH_CAPABILITY_ID, bindings, value.request.scope.schemas), credentials: 'secret' } }, 'KS_OBJECT_CAPABILITY_REQUEST_SURFACE_DENIED'],
+    [{ ...value, request: { ...closed(SEARCH_CAPABILITY_ID, bindings, value.request.scope.schemas), callback: 'https://evil.invalid' } }, 'KS_OBJECT_CAPABILITY_REQUEST_SURFACE_DENIED'],
+    [{ ...value, request: { ...closed(SEARCH_CAPABILITY_ID, bindings, value.request.scope.schemas), rawRows: [] } }, 'KS_OBJECT_CAPABILITY_REQUEST_SURFACE_DENIED'],
+    [{ ...value, request: closed(SEARCH_CAPABILITY_ID, { ...bindings, claims: { completenessClaimed: true } }, value.request.scope.schemas) }, 'KS_OBJECT_CAPABILITY_BINDING_DENIED'],
+    [{ ...value, request: closed(SEARCH_CAPABILITY_ID, { ...bindings, dispatchAuthority: true }, value.request.scope.schemas) }, 'KS_OBJECT_CAPABILITY_BINDING_DENIED'],
+    ...Object.keys(bindings).filter((key) => key !== 'engine').map((key) => [
+      { ...value, request: closed(SEARCH_CAPABILITY_ID, { ...bindings, [key]: hash64('0') }, value.request.scope.schemas) },
+      'KS_OBJECT_CAPABILITY_BINDING_DENIED',
+    ]),
+    [{ ...value, request: closed(SEARCH_CAPABILITY_ID, bindings, ['../escape']) }, 'KS_OBJECT_CAPABILITY_SCOPE_DENIED'],
+    [{ ...value, request: closed(SEARCH_CAPABILITY_ID, bindings, ['other']) }, 'KS_OBJECT_CAPABILITY_SCOPE_DENIED'],
+    [{ ...value, request: closed(SEARCH_CAPABILITY_ID, bindings, Array.from({ length: 257 }, (_, index) => `s${index}`)) }, 'KS_OBJECT_CAPABILITY_SCOPE_DENIED'],
+    [{ ...value, request: null }, 'KS_OBJECT_CAPABILITY_REQUEST_SURFACE_DENIED'],
+  ]
+  for (const [input, code] of cases) assert.throws(() => handleObjectSearchV1(input), { code, message: code })
+})
+
+test('P2B2A: handler-surface injection and projectionInput forgery deny with pinned codes', () => {
+  const { sources, envelope } = syntheticSearchFixture('mssql')
+  const value = validSearchHandlerInput({ engine: 'mssql', sources, envelope })
+  for (const extra of [{ sql: 'SELECT 1' }, { credentials: 'secret' }, { callback: 'https://evil.invalid' }, { result: {} }, { query: 'SELECT 1' }]) {
+    assert.throws(() => handleObjectSearchV1({ ...value, ...extra }), { code: HANDLER_INPUT_INVALID, message: HANDLER_INPUT_INVALID })
+  }
+  for (const projectionInput of [
+    { ...value.projectionInput, sql: 'SELECT 1' },
+    { ...value.projectionInput, credentials: 'secret' },
+    { ...value.projectionInput, callback: 'https://evil.invalid' },
+  ]) {
+    assert.throws(() => handleObjectSearchV1({ ...value, projectionInput }), { code: FORGED_PROJECTION, message: FORGED_PROJECTION })
+  }
+})
+
+test('P2B2A: substituted, re-digested, stale and page-mismatched projections deny with one fixed code', () => {
+  const { sources, envelope } = syntheticSearchFixture('mssql')
+  const value = validSearchHandlerInput({ engine: 'mssql', sources, envelope })
+  const forged = (mutate) => {
+    const projection = structuredClone(value.projection)
+    mutate(projection)
+    return { ...value, projection }
+  }
+  const tampered = [
+    (projection) => { projection.items[0].objectName = 'ForgedTable' },
+    (projection) => { projection.page.matchCount += 1 },
+    (projection) => { projection.bindings.objectNameAuthoritySha256 = hash64('0') },
+    (projection) => { projection.claims.absenceClaimed = true },
+    (projection) => { projection.authority.sqlAuthority = true },
+    (projection) => { projection.authority.dispatchAuthority = true },
+    (projection) => { projection.authority.executionAuthority = true },
+    (projection) => { projection.authority.mutationAuthority = true },
+    (projection) => { projection.authority.replayPreventionClaimed = true },
+    (projection) => { projection.rawRows = [] },
+  ]
+  for (const mutate of tampered) {
+    assert.throws(() => handleObjectSearchV1(forged(mutate)), { code: FORGED_PROJECTION, message: FORGED_PROJECTION })
+  }
+  const redigested = forged((projection) => { projection.items[0].objectName = 'ForgedTable' })
+  const { projectionSha256: observedSha256, ...redigestedBody } = normalizeJsonValue(redigested.projection)
+  assert.throws(() => handleObjectSearchV1({
+    ...redigested,
+    projection: { ...redigestedBody, projectionSha256: identitySha256(redigestedBody) },
+  }), { code: FORGED_PROJECTION, message: FORGED_PROJECTION })
+  const firstInput = { ...sources, request: envelope }
+  const first = buildObjectSearchAuthorityBoundResult(firstInput)
+  assert(first.nextCursor)
+  const secondInput = { ...sources, request: envelope, cursor: first.nextCursor }
+  const second = continueObjectSearchAuthorityBoundResult(secondInput)
+  assert.throws(() => handleObjectSearchV1({ ...value, projection: second }), { code: FORGED_PROJECTION, message: FORGED_PROJECTION })
+  assert.throws(() => handleObjectSearchV1({ ...value, projection: first, projectionInput: secondInput }), { code: FORGED_PROJECTION, message: FORGED_PROJECTION })
+  const exhaustedEnvelope = searchEnvelopeFor('mssql', { pageSize: 10 })
+  const exhaustedInput = { ...sources, request: exhaustedEnvelope, cursor: first.nextCursor }
+  assert.throws(() => handleObjectSearchV1({
+    ...validSearchHandlerInput({ engine: 'mssql', sources, envelope: exhaustedEnvelope }),
+    projectionInput: exhaustedInput,
+  }), { code: FORGED_PROJECTION, message: FORGED_PROJECTION })
+})
+
+test('P2B2A: resealed unsafe search envelopes and request scope substitution deny', () => {
+  const { sources, envelope } = syntheticSearchFixture('mssql')
+  const value = validSearchHandlerInput({ engine: 'mssql', sources, envelope })
+  const resealedEnvelope = (mutate) => {
+    const copy = structuredClone(envelope)
+    delete copy.envelopeSha256
+    mutate(copy)
+    return { ...normalizeJsonValue(copy), envelopeSha256: identitySha256(normalizeJsonValue(copy)) }
+  }
+  const withEnvelope = (mutate) => ({
+    ...value,
+    projection: buildObjectSearchAuthorityBoundResult({ ...sources, request: envelope }),
+    projectionInput: { ...sources, request: resealedEnvelope(mutate) },
+  })
+  const cases = [
+    (body) => { body.prefix = 'Inventory; DROP TABLE Students;--' },
+    (body) => { body.prefix = 'password123' },
+    (body) => { body.pageSize = 501 },
+    (body) => { delete body.coverage.stateCounts.DENIED },
+    (body) => { body.receiptSha256 = hash64('0') },
+    (body) => { body.scope.schemas = ['../escape'] },
+  ]
+  for (const mutate of cases) {
+    assert.throws(() => handleObjectSearchV1(withEnvelope(mutate)), { code: FORGED_PROJECTION, message: FORGED_PROJECTION })
+  }
+  const SCOPE_DENIED = 'KS_OBJECT_CAPABILITY_SCOPE_DENIED'
+  for (const engine of ['mssql', 'oracle']) {
+    const fixture = syntheticSearchFixture(engine)
+    const scoped = validSearchHandlerInput({ engine, sources: fixture.sources, envelope: fixture.envelope })
+    assert.throws(() => handleObjectSearchV1({
+      ...scoped,
+      request: { ...scoped.request, scope: { schemas: ['other'] } },
+    }), { code: SCOPE_DENIED, message: SCOPE_DENIED })
+  }
+})
+
+// Fully synthetic fixture builders for the direct Search handler oracle above.
+// Every input is constructed inline: a minimal structure manifest, template SQL,
+// runtime result sets and a profile context, sealed through the vendored
+// buildPreflightEvidence and progressive-controller authority chain. No
+// query-pack/profile files are read and no environment is consulted.
+const SYNTHETIC_SCHEMA = { mssql: 'dbo', oracle: 'BI_DEMO' }
+const SYNTHETIC_DATABASE = { mssql: 'Analytics', oracle: 'FREE' }
+const SYNTHETIC_CONTAINER = { mssql: null, oracle: 'FREEPDB1' }
+const SYNTHETIC_PREFIX = { mssql: 'Inventory', oracle: 'Order' }
+const SYNTHETIC_RELATIONS = {
+  mssql: [
+    { schema_name: 'dbo', relation_name: 'InventoryTable', relation_kind: 'TABLE' },
+    { schema_name: 'dbo', relation_name: 'InventoryView', relation_kind: 'VIEW' },
+  ],
+  oracle: [
+    { schema_name: 'BI_DEMO', relation_name: 'Order Detail$Table', relation_kind: 'TABLE' },
+    { schema_name: 'BI_DEMO', relation_name: 'Order Detail$View', relation_kind: 'VIEW' },
+  ],
+}
+const SYNTHETIC_COVERAGE_STATES = ['COMPLETE', 'PARTIAL', 'DENIED', 'UNKNOWN']
+
+function syntheticStructureManifest(engine) {
+  const provenance = { url: 'https://github.com/JoFe2/KaleidoSphere', copiedCode: false }
+  const query = (id, category, file, outputColumns) => ({
+    id,
+    category,
+    file,
+    outputColumns,
+    sortKeys: [],
+    scopeColumn: 'schema_name',
+    timeoutMs: 1000,
+    cost: 'BOUNDED',
+    readOnly: true,
+    privilege: { minimum: 'CONNECT' },
+    fallback: { onDenied: 'DENIED_IS_NOT_ABSENT' },
+    provenance,
+  })
+  return {
+    schemaVersion: 'chimpmaera.db/query-manifest/v1',
+    packId: `synthetic-${engine}-search-pack`,
+    packVersion: '1.0.0',
+    engine,
+    queries: [
+      query(`${engine}.structure.schemas`, 'schemas', `synthetic-${engine}-structure-schemas.sql`, ['schema_name']),
+      query(`${engine}.structure.relations`, 'relations', `synthetic-${engine}-structure-relations.sql`, ['schema_name', 'relation_name', 'relation_kind']),
+    ],
+  }
+}
+
+function syntheticStructureEvidence(engine) {
+  const manifest = syntheticStructureManifest(engine)
+  const sqlByQueryId = Object.fromEntries(manifest.queries.map((item) => [item.id, `SELECT synthetic ${item.category} rows for ${item.id};`]))
+  const resultSets = {
+    schemaVersion: 'chimpmaera.db/runtime-query-results/v1',
+    engine,
+    runtimeValidated: true,
+    results: {
+      [`${engine}.structure.schemas`]: { state: 'SUCCEEDED', reasonCode: null, rows: [{ schema_name: SYNTHETIC_SCHEMA[engine] }] },
+      [`${engine}.structure.relations`]: { state: 'SUCCEEDED', reasonCode: null, rows: SYNTHETIC_RELATIONS[engine] },
+    },
+  }
+  const profileContext = {
+    profileId: `synthetic-${engine}-search-profile`,
+    mode: 'RUNTIME',
+    scope: { database: SYNTHETIC_DATABASE[engine], container: SYNTHETIC_CONTAINER[engine], schemas: [SYNTHETIC_SCHEMA[engine]] },
+    policy: { access: 'READ_ONLY', allowRowSamples: false, maxQueryTimeoutMs: 10000 },
+    adapter: { kind: engine },
+  }
+  return buildPreflightEvidence({ manifest, sqlByQueryId, resultSets, profileContext })
+}
+
+function syntheticSearchSources(engine) {
+  const evidence = syntheticStructureEvidence(engine)
+  const base = buildProgressiveCoverage(evidence)
+  const coverage = createProgressiveCoverage({
+    engine,
+    structureSnapshotSha256: base.structureSnapshotSha256,
+    structureCoverageLedgerSha256: base.structureCoverageLedgerSha256,
+    entries: base.entries.map((entry, index) => ({
+      objectRef: entry.objectRef,
+      state: SYNTHETIC_COVERAGE_STATES[index % 4],
+      reasonCode: index % 4 === 0 ? null : `FIXTURE_${SYNTHETIC_COVERAGE_STATES[index % 4]}`,
+      sourceQueryId: entry.sourceQueryId,
+      evidenceRefs: entry.evidenceRefs,
+    })),
+    queryCoverage: base.queryCoverage,
+  })
+  const controllerRun = createProgressiveRun({
+    runId: `${engine}-search-handler-v1-secret`,
+    engine,
+    scope: evidence.profile.scope,
+    methodRegistry: buildProgressiveMethodRegistry({ structureManifest: syntheticStructureManifest(engine) }),
+    coverage,
+    budgets: { maxRunProbes: 4, maxObjectProbes: 2 },
+  })
+  const inventoryAuthorityProjection = buildObjectInventoryAuthorityDigest(controllerRun)
+  const relationKindAuthorityProjection = buildObjectRelationKindAuthority({
+    controllerRun, inventoryAuthorityProjection, structureEvidence: evidence,
+  })
+  const objectNameAuthorityProjection = buildObjectNameAuthority({
+    controllerRun, inventoryAuthorityProjection, relationKindAuthorityProjection, structureEvidence: evidence,
+  })
+  return {
+    controllerRun,
+    inventoryAuthorityProjection,
+    relationKindAuthorityProjection,
+    objectNameAuthorityProjection,
+    structureEvidence: evidence,
+  }
+}
+
+function searchEnvelopeFor(engine, { pageSize = 1 } = {}) {
+  return createObjectSearchEnvelope({
+    engine,
+    scope: { schemas: [SYNTHETIC_SCHEMA[engine]] },
+    prefix: SYNTHETIC_PREFIX[engine],
+    kindFilters: ['TABLE', 'VIEW'],
+    pageSize,
+    inventory: createObjectInventorySnapshot({
+      engine,
+      kindCounts: { TABLE: 2, VIEW: 1, COLUMN: 0, INDEX: 0, SEQUENCE: 0, SYNONYM: 0 },
+    }),
+    coverage: createObjectSearchCoverageBinding({
+      stateCounts: { SUCCEEDED: 5, PARTIAL: 1, DENIED: 1, UNSUPPORTED: 0, TIMEOUT: 0, ERROR: 0 },
+    }),
+  })
+}
+
+function syntheticSearchFixture(engine) {
+  return { sources: syntheticSearchSources(engine), envelope: searchEnvelopeFor(engine) }
+}
+
+function validSearchHandlerInput({ engine, sources, envelope, cursor }) {
+  const bindings = {
+    engine,
+    snapshotSha256: sources.objectNameAuthorityProjection.structureSnapshotSha256,
+    receiptSha256: envelope.envelopeSha256,
+    coverageSha256: sources.controllerRun.coverage.coverageSha256,
+    inventoryAuthoritySha256: sources.objectNameAuthorityProjection.inventoryAuthorityDigestSha256,
+    relationKindAuthoritySha256: sources.objectNameAuthorityProjection.relationKindAuthoritySha256,
+    objectNameAuthoritySha256: sources.objectNameAuthorityProjection.objectNameAuthoritySha256,
+    cancellationSha256: identitySha256({ cancellation: 'NONE', engine }),
+  }
+  const projectionInput = cursor
+    ? { ...sources, request: envelope, cursor }
+    : { ...sources, request: envelope }
+  const projection = cursor
+    ? continueObjectSearchAuthorityBoundResult(projectionInput)
+    : buildObjectSearchAuthorityBoundResult(projectionInput)
+  return {
+    request: {
+      schemaVersion: KS_OBJECT_CAPABILITY_REQUEST_SCHEMA,
+      requestId: `handler-${SEARCH_CAPABILITY_ID.split('.').pop()}`,
+      capabilityId: SEARCH_CAPABILITY_ID,
+      bindings,
+      scope: { schemas: envelope.scope.schemas },
+    },
+    projection,
+    projectionInput,
+  }
+}
