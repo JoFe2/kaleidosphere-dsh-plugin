@@ -191,6 +191,29 @@ function runRealVerifier(packageDir) {
   }
 }
 
+// Build a scratch archive that mirrors the package root the real verifier reads:
+// the full v0.16.0 tree, the full v0.24.0 tree, the real verifier script, and a
+// manifest copy (buffer writes, so any source file mode — the reference mount is
+// read-only — cannot block mutation).
+async function buildVerifierScratchArchive(scratch, manifest) {
+  for (const entry of manifest.v0240.files) {
+    const buffer = await readFile(path.join(packageRoot, entry.vendorPath))
+    const target = path.join(scratch, entry.vendorPath)
+    await mkdir(path.dirname(target), { recursive: true })
+    await writeFile(target, buffer)
+  }
+  for (const entry of (await listFiles(path.join(packageRoot, V016_ROOT))).map((item) => path.relative(packageRoot, item))) {
+    const buffer = await readFile(path.join(packageRoot, entry))
+    const target = path.join(scratch, entry)
+    await mkdir(path.dirname(target), { recursive: true })
+    await writeFile(target, buffer)
+  }
+  await mkdir(path.join(scratch, 'scripts'), { recursive: true })
+  await writeFile(path.join(scratch, 'scripts', 'verify-vendor.mjs'),
+    await readFile(path.join(packageRoot, 'scripts', 'verify-vendor.mjs')))
+  await writeFile(path.join(scratch, 'VENDORED_MANIFEST.json'), JSON.stringify(manifest, null, 2) + '\n')
+}
+
 test('P2A-P1: 16/16 vendor files byte-identical with exact per-file provenance', async () => {
   const manifest = JSON.parse(await readFile(path.join(packageRoot, 'VENDORED_MANIFEST.json'), 'utf8'))
   const closure = manifest.v0240
@@ -392,23 +415,7 @@ test('P2A-P3b: the real verifier fails closed — manifest digest mutation and b
   const scratch = await mkdtemp(path.join(os.tmpdir(), 'ks-v0240-verifier-'))
   try {
     // Build a scratch archive: full vendor tree, real verifier script, manifest copy.
-    for (const entry of entries) {
-      const buffer = await readFile(path.join(packageRoot, entry.vendorPath))
-      const target = path.join(scratch, entry.vendorPath)
-      await mkdir(path.dirname(target), { recursive: true })
-      await writeFile(target, buffer)
-    }
-    for (const entry of (await listFiles(path.join(packageRoot, V016_ROOT))).map((item) => path.relative(packageRoot, item))) {
-      const buffer = await readFile(path.join(packageRoot, entry))
-      const target = path.join(scratch, entry)
-      await mkdir(path.dirname(target), { recursive: true })
-      await writeFile(target, buffer)
-    }
-    await mkdir(path.join(scratch, 'scripts'), { recursive: true })
-    await writeFile(path.join(scratch, 'scripts', 'verify-vendor.mjs'),
-      await readFile(path.join(packageRoot, 'scripts', 'verify-vendor.mjs')))
-    await writeFile(path.join(scratch, 'VENDORED_MANIFEST.json'),
-      JSON.stringify(manifest, null, 2) + '\n')
+    await buildVerifierScratchArchive(scratch, manifest)
 
     // Clean scratch archive: the real verifier must pass (exit 0).
     const clean = runRealVerifier(scratch)
@@ -441,6 +448,57 @@ test('P2A-P3b: the real verifier fails closed — manifest digest mutation and b
     const fileMissing = runRealVerifier(scratch)
     assert.notEqual(fileMissing.status, 0,
       'a missing vendor file must make the real verifier exit nonzero')
+  } finally {
+    await rm(scratch, { recursive: true, force: true })
+  }
+
+  // The real tree must still pass the real verifier and be unaltered.
+  const real = runRealVerifier(packageRoot)
+  assert.equal(real.status, 0, `real tree must pass the real verifier (got exit ${real.status}: ${real.output})`)
+})
+
+test('P2A-P3c: joint commit mutation — v0240.commit and every sourceCommit zeroed are denied by the real verifier', async () => {
+  // P2A-MEDIUM-001: the verifier compared each sourceCommit only to the section
+  // commit, so zeroing both jointly (with digests intact) exited 0. It must
+  // compare closure.commit and every per-file sourceCommit to the exact source
+  // commit e092bb0b..., which denies the joint mutation and each single-field
+  // variant.
+  const manifest = JSON.parse(await readFile(path.join(packageRoot, 'VENDORED_MANIFEST.json'), 'utf8'))
+  const scratch = await mkdtemp(path.join(os.tmpdir(), 'ks-v0240-joint-'))
+  const writeManifest = (doc) => writeFile(path.join(scratch, 'VENDORED_MANIFEST.json'), JSON.stringify(doc, null, 2) + '\n')
+  try {
+    await buildVerifierScratchArchive(scratch, manifest)
+
+    const clean = runRealVerifier(scratch)
+    assert.equal(clean.status, 0, `unmutated scratch archive must pass the real verifier (got exit ${clean.status}: ${clean.output})`)
+
+    // (a) JOINT MUTATION: zero the section commit AND every per-file sourceCommit.
+    const joint = JSON.parse(await readFile(path.join(scratch, 'VENDORED_MANIFEST.json'), 'utf8'))
+    joint.v0240.commit = '0'.repeat(40)
+    for (const entry of joint.v0240.files) entry.sourceCommit = '0'.repeat(40)
+    await writeManifest(joint)
+    const jointResult = runRealVerifier(scratch)
+    assert.notEqual(jointResult.status, 0,
+      'joint commit mutation must make the real verifier exit nonzero (P2A-MEDIUM-001)')
+
+    // (b) Zeroing the section commit alone must also be denied: the verifier must
+    // compare closure.commit to the exact source commit, not to the entries.
+    await writeManifest(manifest)
+    const sectionOnly = JSON.parse(await readFile(path.join(scratch, 'VENDORED_MANIFEST.json'), 'utf8'))
+    sectionOnly.v0240.commit = '0'.repeat(40)
+    await writeManifest(sectionOnly)
+    const sectionOnlyResult = runRealVerifier(scratch)
+    assert.notEqual(sectionOnlyResult.status, 0,
+      'a zeroed v0240.commit alone must make the real verifier exit nonzero')
+
+    // (c) Zeroing every per-file sourceCommit alone must also be denied.
+    await writeManifest(manifest)
+    const entriesOnly = JSON.parse(await readFile(path.join(scratch, 'VENDORED_MANIFEST.json'), 'utf8'))
+    for (const entry of entriesOnly.v0240.files) entry.sourceCommit = '0'.repeat(40)
+    await writeManifest(entriesOnly)
+    const entriesOnlyResult = runRealVerifier(scratch)
+    assert.notEqual(entriesOnlyResult.status, 0,
+      'zeroed per-file sourceCommits alone must make the real verifier exit nonzero')
   } finally {
     await rm(scratch, { recursive: true, force: true })
   }
