@@ -6,6 +6,13 @@ import path from 'node:path'
 const packageRoot = path.resolve(import.meta.dirname, '..')
 const manifest = JSON.parse(await readFile(path.join(packageRoot, 'VENDORED_MANIFEST.json'), 'utf8'))
 
+// The exact KaleidoSphere source commit the v0.24.0 handler closure was vendored
+// from (pinned by the reference manifest at SHA-256 3806d71a...dc1c7). The
+// section commit and every per-file sourceCommit are compared against this exact
+// value — a manifest that rewrites both jointly (e.g. to all zeros) must fail
+// closed, not merely self-consistent (P2A-MEDIUM-001).
+const V0240_SOURCE_COMMIT = 'e092bb0bce039936b88329793b24e9f987ae0ddb'
+
 async function files(directory) {
   const result = []
   for (const entry of await readdir(directory, { withFileTypes: true })) {
@@ -46,6 +53,8 @@ async function aggregateDigest(rootDir) {
 {
   const closure = manifest.v0240
   assert.ok(closure, 'VENDORED_MANIFEST.json must carry a v0240 handler-closure section')
+  assert.equal(closure.commit, V0240_SOURCE_COMMIT,
+    `v0240 section commit must be the exact source commit ${V0240_SOURCE_COMMIT}`)
   const entries = closure.files
   assert.ok(Array.isArray(entries) && entries.length > 0,
     'v0240 section must carry a non-empty per-file entries array')
@@ -58,8 +67,8 @@ async function aggregateDigest(rootDir) {
   for (const entry of entries) {
     assert.equal(entry.vendorPath, `${closure.root}/${entry.sourcePath}`,
       `v0240 vendor path ${entry.vendorPath} must mirror source path ${entry.sourcePath}`)
-    assert.equal(entry.sourceCommit, closure.commit,
-      `v0240 entry ${entry.sourcePath} source commit must equal the section commit`)
+    assert.equal(entry.sourceCommit, V0240_SOURCE_COMMIT,
+      `v0240 entry ${entry.sourcePath} source commit must be the exact source commit ${V0240_SOURCE_COMMIT}`)
     const buffer = await readFile(path.join(packageRoot, entry.vendorPath), { flag: 'r' }).catch(() => null)
     assert.ok(buffer, `v0240 vendor file ${entry.vendorPath} is missing from the tree`)
     const actual = createHash('sha256').update(buffer).digest('hex')
