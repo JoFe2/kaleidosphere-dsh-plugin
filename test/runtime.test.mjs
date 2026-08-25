@@ -58,6 +58,16 @@ import {
   KS_OBJECT_SEARCH_HANDLER_CAPABILITY_ID,
   handleObjectSearchV1,
 } from '../vendor/kaleidosphere-v0.24.0/services/bi-agent/src/object-search-handler-v1.mjs'
+import {
+  KS_OBJECT_DETAILS_HANDLER_CAPABILITY,
+  KS_OBJECT_DETAILS_HANDLER_FAIL_CLOSED_CODES,
+  handleObjectDetailsV1,
+} from '../vendor/kaleidosphere-v0.24.0/services/bi-agent/src/object-details-handler-v1.mjs'
+import {
+  OBJECT_DETAILS_PROJECTION_SCHEMA,
+  projectObjectDetails,
+  verifyObjectDetailsProjection,
+} from '../vendor/kaleidosphere-v0.24.0/services/bi-control/src/db-analyzer/object-details-projection-v1.mjs'
 
 const expectedDigests = JSON.parse(await readFile(new URL('./expected-fixture-digests.json', import.meta.url), 'utf8'))
 
@@ -1102,3 +1112,283 @@ test('P2B2B: external runtime mode denies Search locally and never sends it to t
     await new Promise(resolve => server.close(resolve))
   }
 })
+
+// P2B3A: reusable fully synthetic direct Details-handler fixture and focused
+// happy/negative oracle against the pinned vendored handleObjectDetailsV1
+// (v0.24.0 closure, source commit e092bb0), derived from the upstream reference
+// test object-details-handler-v1.test.mjs (SHA-256
+// aa340155e06a1f97092b8f7a3759d248aa45e283ede1cd2562153f22bf9fc4c5). The oracle
+// follows the pinned post-merge two-argument
+// handleObjectDetailsV1(request, projectionInput) signature and is
+// self-contained: the progressive coverage ledger, sealed evidence receipt,
+// projection input and capability request are built inline from synthetic
+// literals, so there are no query-pack/profile data-file reads, environment
+// credentials, network access, production runtime edits, or Search fixture
+// rewrites. The reference adversarial-matrix helper is not part of the pinned
+// closure; its negative cases are therefore enumerated inline with exact
+// pinned codes, matching the P2B2A oracle precedent.
+const DETAILS_ENGINES = ['mssql', 'oracle']
+const DETAILS_REQUEST_IDENTITY_DENIED = 'KS_OBJECT_CAPABILITY_REQUEST_IDENTITY_DENIED'
+const DETAILS_CLAIM_DENIED = 'KS_OBJECT_CAPABILITY_CLAIM_DENIED'
+const DETAILS_AUTHORITY_DENIED = 'KS_OBJECT_CAPABILITY_AUTHORITY_DENIED'
+const DETAILS_HANDLER_FAIL_CLOSED_CODES = Object.freeze([
+  'KS_OBJECT_DETAILS_HANDLER_CAPABILITY_DENIED',
+  'KS_OBJECT_DETAILS_HANDLER_REQUEST_DIGEST_DRIFT',
+  'KS_OBJECT_DETAILS_HANDLER_PROJECTION_INPUT_INVALID',
+  'KS_OBJECT_DETAILS_HANDLER_ENGINE_DRIFT',
+  'KS_OBJECT_DETAILS_HANDLER_SCOPE_DRIFT',
+  'KS_OBJECT_DETAILS_HANDLER_BINDING_DRIFT',
+  'KS_OBJECT_DETAILS_HANDLER_PROJECTION_DIGEST_DRIFT',
+])
+const DETAILS_RESULT_KEYS = Object.freeze([
+  'authority', 'bindings', 'capabilityId', 'claims', 'projectionSha256', 'requestSha256', 'schemaVersion', 'state',
+])
+const DETAILS_CLAIMS = Object.freeze({
+  absenceClaimed: false, completenessClaimed: false, replayPreventionClaimed: false, sourceRowsIncluded: false,
+})
+const DETAILS_AUTHORITY = Object.freeze({
+  credentialsIncluded: false, dispatchAuthority: false, executionAuthority: false,
+  mutationAuthority: false, queryExecution: false, rawValuesIncluded: false, sqlAuthority: false,
+})
+
+test('P2B3A: vendored handleObjectDetailsV1 derives exact MSSQL/Oracle coverage states and returns deterministic isolated read-only projections', () => {
+  for (const engine of DETAILS_ENGINES) {
+    for (const [name, spec] of Object.entries(DETAILS_STATES)) {
+      const {projectionInput, request, projection} = syntheticDetailsScenario(engine, spec)
+      const result = handleObjectDetailsV1(request, projectionInput)
+      assert.equal(result.schemaVersion, KS_OBJECT_CAPABILITY_RESULT_SCHEMA)
+      assert.equal(result.state, 'PROJECTED_READ_ONLY')
+      assert.equal(result.capabilityId, KS_OBJECT_DETAILS_HANDLER_CAPABILITY)
+      assert.equal(result.requestSha256, identitySha256(normalizeJsonValue(request)))
+      assert.equal(result.projectionSha256, projection.projectionSha256)
+      assert.deepEqual(result.bindings, detailsBindingsOf(projection))
+      assert.notEqual(result.bindings, request.bindings)
+      assert.deepEqual(Object.keys(result).sort(), [...DETAILS_RESULT_KEYS])
+      assert.deepEqual(result.claims, DETAILS_CLAIMS)
+      assert.deepEqual(result.authority, DETAILS_AUTHORITY)
+      verifyObjectDetailsProjection(projection, projectionInput)
+      assert.equal(projection.schemaVersion, OBJECT_DETAILS_PROJECTION_SCHEMA)
+      assert.equal(projection.coverage.state, spec.state, `${engine} ${name}`)
+      assertFrozen(result)
+      assert.equal(canonicalJson(handleObjectDetailsV1(request, projectionInput)), canonicalJson(result))
+    }
+  }
+})
+
+test('P2B3A: handler exports the closed read-only details capability and the pinned fail-closed code set without dispatch', () => {
+  assert.equal(KS_OBJECT_DETAILS_HANDLER_CAPABILITY, 'bi.object.details.read')
+  assert.ok(Object.isFrozen(KS_OBJECT_DETAILS_HANDLER_FAIL_CLOSED_CODES))
+  assert.deepEqual(KS_OBJECT_DETAILS_HANDLER_FAIL_CLOSED_CODES, [...DETAILS_HANDLER_FAIL_CLOSED_CODES])
+  assert.ok(!KS_OBJECT_DETAILS_HANDLER_FAIL_CLOSED_CODES.includes('KS_OBJECT_DETAILS_HANDLER_DISPATCH_INCLUDED'))
+})
+
+test('P2B3A: capability, scope and every capability-profile binding substitution deny with pinned codes against unchanged authority', () => {
+  const {projectionInput, request} = syntheticDetailsScenario('mssql', DETAILS_STATES.COMPLETE)
+  assert.throws(() => handleObjectDetailsV1({...request, capabilityId: 'bi.object.search.read'}, projectionInput),
+    {code: DETAILS_REQUEST_IDENTITY_DENIED, message: DETAILS_REQUEST_IDENTITY_DENIED})
+  const substitutions = [
+    ['scope', {schemas: ['other']}],
+    ...Object.keys(request.bindings).filter((key) => key !== 'engine').map((key) => [key, hash64('0')]),
+  ]
+  for (const [key, value] of substitutions) {
+    const substituted = key === 'scope'
+      ? {...request, scope: value}
+      : {...request, bindings: {...request.bindings, [key]: value}}
+    const code = key === 'scope' ? SCOPE_DENIED : BINDING_DENIED
+    assert.throws(() => handleObjectDetailsV1(substituted, projectionInput), {code, message: code})
+  }
+  assert.throws(() => handleObjectDetailsV1(
+    {...request, bindings: {...request.bindings, cancellationSha256: hash64('7')}}, projectionInput),
+    {code: BINDING_DENIED, message: BINDING_DENIED})
+})
+
+test('P2B3A: unsafe request fields, identifiers, oversized evidence, stale receipt and projection-input substitutions deny with pinned codes', () => {
+  const {ledger, entry, request, projectionInput} = syntheticDetailsScenario('mssql', DETAILS_STATES.COMPLETE)
+  for (const [field, value] of [['sql', 'SELECT 1'], ['credentials', 'secret'], ['rawRows', []], ['callback', 'https://evil.invalid']]) {
+    assert.throws(() => handleObjectDetailsV1({...request, [field]: value}, projectionInput),
+      {code: REQUEST_SURFACE_DENIED, message: REQUEST_SURFACE_DENIED})
+  }
+  const withEntry = (next) => detailsProjectionInputFor('mssql', {entry: next, ledger: detailsLedgerWithEntry(ledger, next)})
+  assert.throws(() => handleObjectDetailsV1(request, withEntry(detailsRawEntry({relationName: 'sales--orders'}))),
+    {code: 'DB_OBJECT_DETAILS_IDENTIFIER_INVALID', message: 'DB_OBJECT_DETAILS_IDENTIFIER_INVALID'})
+  assert.throws(() => handleObjectDetailsV1(request, withEntry(detailsRawEntry({relationName: 'sales_orders_verified'}))),
+    {code: 'DB_OBJECT_DETAILS_IDENTIFIER_CLAIM', message: 'DB_OBJECT_DETAILS_IDENTIFIER_CLAIM'})
+  const oversized = detailsRawEntry({})
+  oversized.evidenceRefs = Array.from({length: 17}, (_, index) => identitySha256({evidence: index}))
+  assert.throws(() => handleObjectDetailsV1(request, withEntry(oversized)),
+    {code: 'DB_OBJECT_DETAILS_EVIDENCE_INVALID', message: 'DB_OBJECT_DETAILS_EVIDENCE_INVALID'})
+  assert.throws(() => handleObjectDetailsV1(request, {...projectionInput, objectKey: identitySha256({missing: true})}),
+    {code: 'DB_OBJECT_DETAILS_COVERAGE_MISSING', message: 'DB_OBJECT_DETAILS_COVERAGE_MISSING'})
+  const unrelated = detailsLedgerFor('mssql', DETAILS_STATES.COMPLETE, {relationName: 'other_orders'})
+  assert.throws(() => handleObjectDetailsV1(request, detailsProjectionInputFor('mssql', {
+    entry, ledger, receipt: detailsReceiptFor('mssql', {entry: unrelated.entry, ledger: unrelated.ledger}),
+  })), {code: 'DB_OBJECT_DETAILS_RECEIPT_BINDING_INVALID', message: 'DB_OBJECT_DETAILS_RECEIPT_BINDING_INVALID'})
+  assert.throws(() => handleObjectDetailsV1(request, {...projectionInput, hint: 'select 1'}),
+    {code: 'DB_OBJECT_DETAILS_INPUT_INVALID', message: 'DB_OBJECT_DETAILS_INPUT_INVALID'})
+})
+
+test('P2B3A: re-digested forged details evidence and every result authority widening deny with pinned codes', () => {
+  const {projectionInput, request, projection} = syntheticDetailsScenario('mssql', DETAILS_STATES.COMPLETE)
+  const {projectionSha256: _old, ...body} = {...projection, coverage: {...projection.coverage, visibility: 'EXHAUSTIVE'}}
+  const forged = {...body, projectionSha256: identitySha256(body)}
+  assert.throws(() => verifyObjectDetailsProjection(forged, projectionInput),
+    {code: 'DB_OBJECT_DETAILS_FORGED', message: 'DB_OBJECT_DETAILS_FORGED'})
+
+  const result = handleObjectDetailsV1(request, projectionInput)
+  const expected = {
+    capabilityId: result.capabilityId,
+    requestSha256: result.requestSha256,
+    projectionSha256: result.projectionSha256,
+    bindings: detailsBindingsOf(projection),
+  }
+  const {validateResult} = buildObjectCapabilityContractV1()
+  assert.deepEqual(validateResult(result, expected), result)
+  const widenings = [
+    [{...result, claims: {...result.claims, completenessClaimed: true}}, DETAILS_CLAIM_DENIED],
+    [{...result, claims: {...result.claims, sourceRowsIncluded: true}}, DETAILS_CLAIM_DENIED],
+    [{...result, authority: {...result.authority, dispatchAuthority: true}}, DETAILS_AUTHORITY_DENIED],
+    [{...result, authority: {...result.authority, executionAuthority: true}}, DETAILS_AUTHORITY_DENIED],
+    [{...result, authority: {...result.authority, mutationAuthority: true}}, DETAILS_AUTHORITY_DENIED],
+    [{...result, authority: {...result.authority, sqlAuthority: true}}, DETAILS_AUTHORITY_DENIED],
+    [{...result, authority: {...result.authority, rawValuesIncluded: true}}, DETAILS_AUTHORITY_DENIED],
+  ]
+  for (const [changed, code] of widenings) assert.throws(() => validateResult(changed, expected), {code, message: code})
+})
+
+test('P2B3A: Proxy, accessor, hidden and symbol request surfaces deny before traps execute', () => {
+  const {projectionInput, request} = syntheticDetailsScenario('mssql', DETAILS_STATES.COMPLETE)
+  let traps = 0
+  const proxy = new Proxy(request, {getPrototypeOf() { traps += 1; return Object.prototype; }})
+  assert.throws(() => handleObjectDetailsV1(proxy, projectionInput),
+    {code: REQUEST_SURFACE_DENIED, message: REQUEST_SURFACE_DENIED})
+  assert.equal(traps, 0)
+
+  const hidden = structuredClone(request)
+  Object.defineProperty(hidden, 'credentials', {value: 'secret', enumerable: false})
+  assert.throws(() => handleObjectDetailsV1(hidden, projectionInput),
+    {code: REQUEST_SURFACE_DENIED, message: REQUEST_SURFACE_DENIED})
+  const symbol = structuredClone(request)
+  symbol[Symbol('secret')] = 'hidden'
+  assert.throws(() => handleObjectDetailsV1(symbol, projectionInput),
+    {code: REQUEST_SURFACE_DENIED, message: REQUEST_SURFACE_DENIED})
+
+  let getterCalls = 0
+  const accessor = structuredClone(request)
+  Object.defineProperty(accessor.bindings, 'coverageSha256', {
+    enumerable: true, get() { getterCalls += 1; return request.bindings.coverageSha256; },
+  })
+  assert.throws(() => handleObjectDetailsV1(accessor, projectionInput),
+    {code: REQUEST_SURFACE_DENIED, message: REQUEST_SURFACE_DENIED})
+  assert.equal(getterCalls, 0)
+})
+
+// Fully synthetic fixture builders for the direct Details handler oracle
+// above. Every input is constructed inline from synthetic literals: a coverage
+// ledger sealed through the vendored createProgressiveCoverage, a sealed
+// evidence receipt, the projection input and the capability request bound to
+// the recomputed projection. No query-pack/profile files are read and no
+// environment is consulted.
+const DETAILS_SCOPES = {
+  mssql: {database: 'salesdb', container: null, schemas: ['dbo', 'finance']},
+  oracle: {database: 'orcl_sales', container: null, schemas: ['DBO', 'FIN']},
+}
+const DETAILS_STATES = {
+  COMPLETE: {state: 'COMPLETE', reasonCode: null},
+  DENIED: {state: 'DENIED', reasonCode: 'PRIVILEGE_DENIED'},
+  PARTIAL: {state: 'PARTIAL', reasonCode: 'PARTIAL_ROW_LIMIT'},
+  UNKNOWN: {state: 'UNKNOWN', reasonCode: 'OBJECT_NOT_FOUND'},
+}
+const DETAILS_VISIBILITY = {COMPLETE: 'VISIBLE', DENIED: 'INVISIBLE', PARTIAL: 'VISIBLE_PARTIAL', UNKNOWN: 'UNKNOWN'}
+
+const detailsScopeSha256 = (engine) => identitySha256(normalizeJsonValue(DETAILS_SCOPES[engine]))
+const detailsSnapshotSha256 = (engine) => identitySha256({kind: 'structure-snapshot', engine})
+const detailsPreflightLedgerSha256 = (engine) => identitySha256({kind: 'preflight-coverage-ledger', engine})
+const detailsSourceObjectSha256 = (engine, relationName) => identitySha256({kind: 'inventory-object', engine, relationName})
+const detailsSeal = (body, key) => ({...normalizeJsonValue(body), [key]: identitySha256(normalizeJsonValue(body))})
+
+function detailsLedgerFor(engine, spec, {relationName = 'sales_orders'} = {}) {
+  const sourceObjectSha256 = detailsSourceObjectSha256(engine, relationName)
+  const refs = [...new Set([detailsSnapshotSha256(engine), detailsPreflightLedgerSha256(engine), sourceObjectSha256])].sort()
+  const objectRef = {
+    kind: 'RELATION', schemaName: DETAILS_SCOPES[engine].schemas[0], relationName,
+    columnName: null, objectName: null, sourceObjectSha256,
+  }
+  const queryState = spec.state === 'COMPLETE' ? 'SUCCEEDED' : spec.state === 'DENIED' ? 'DENIED' : 'PARTIAL'
+  const ledger = createProgressiveCoverage({
+    engine,
+    structureSnapshotSha256: detailsSnapshotSha256(engine),
+    structureCoverageLedgerSha256: detailsPreflightLedgerSha256(engine),
+    entries: [{objectRef, state: spec.state, reasonCode: spec.reasonCode, sourceQueryId: `${engine}.structure-relations`, evidenceRefs: refs}],
+    queryCoverage: [{
+      queryId: `${engine}.structure-relations`, category: 'relations', state: queryState,
+      reasonCode: spec.state === 'COMPLETE' ? null : spec.reasonCode,
+      visibility: spec.state === 'COMPLETE' ? 'VISIBLE_COMPLETE' : DETAILS_VISIBILITY[spec.state], absenceClaim: 'NOT_CLAIMED',
+    }],
+  })
+  return {ledger, entry: ledger.entries[0]}
+}
+
+function detailsReceiptFor(engine, {entry, ledger}) {
+  return detailsSeal({
+    schemaVersion: 'kaleidosphere.analysis/object-details-evidence-receipt/v1', engine,
+    scopeSha256: detailsScopeSha256(engine), inventorySnapshotSha256: detailsSnapshotSha256(engine),
+    coverageLedgerSha256: ledger.coverageSha256,
+    objectKey: entry.objectKey, coverageEntrySha256: identitySha256(entry), evidenceRefs: [...entry.evidenceRefs].sort(),
+  }, 'receiptSha256')
+}
+
+function detailsProjectionInputFor(engine, {
+  entry,
+  ledger,
+  receipt = detailsReceiptFor(engine, {entry, ledger}),
+  objectKey = entry.objectKey,
+  scope = DETAILS_SCOPES[engine],
+  scopeSha256 = detailsScopeSha256(engine),
+  inventorySnapshotSha256 = detailsSnapshotSha256(engine),
+  ...extra
+} = {}) {
+  return {engine, scope, scopeSha256, inventorySnapshotSha256, coverageLedger: ledger, receipt, objectKey, ...extra}
+}
+
+function detailsBindingsOf(projection) {
+  return {
+    engine: projection.engine,
+    snapshotSha256: projection.bindings.inventorySnapshotSha256,
+    receiptSha256: projection.bindings.receiptSha256,
+    coverageSha256: projection.bindings.coverageLedgerSha256,
+  }
+}
+
+function syntheticDetailsScenario(engine, spec) {
+  const {ledger, entry} = detailsLedgerFor(engine, spec)
+  const receipt = detailsReceiptFor(engine, {entry, ledger})
+  const projectionInput = detailsProjectionInputFor(engine, {entry, ledger, receipt})
+  const projection = projectObjectDetails(projectionInput)
+  const request = {
+    schemaVersion: KS_OBJECT_CAPABILITY_REQUEST_SCHEMA,
+    requestId: `details-${engine}-${spec.state.toLowerCase()}`,
+    capabilityId: KS_OBJECT_DETAILS_HANDLER_CAPABILITY,
+    bindings: detailsBindingsOf(projection),
+    scope: {schemas: [...DETAILS_SCOPES[engine].schemas]},
+  }
+  return {ledger, entry, receipt, projectionInput, request, projection}
+}
+
+function detailsRawEntry({engine = 'mssql', relationName = 'sales_orders', schemaName = DETAILS_SCOPES.mssql.schemas[0], evidenceRefs} = {}) {
+  const objectRef = {
+    kind: 'RELATION', schemaName, relationName, columnName: null, objectName: null,
+    sourceObjectSha256: detailsSourceObjectSha256(engine, relationName),
+  }
+  return {
+    objectKey: identitySha256(objectRef), objectRef, state: 'COMPLETE', reasonCode: null,
+    sourceQueryId: `${engine}.structure-relations`,
+    evidenceRefs: evidenceRefs ?? [...new Set([detailsSnapshotSha256(engine), detailsPreflightLedgerSha256(engine), detailsSourceObjectSha256(engine, relationName)])].sort(),
+    absenceClaim: 'NOT_CLAIMED',
+  }
+}
+
+function detailsLedgerWithEntry(ledger, entry) {
+  const {coverageSha256: _old, ...body} = structuredClone(ledger)
+  body.entries = [entry]
+  return detailsSeal(body, 'coverageSha256')
+}
