@@ -1021,7 +1021,10 @@ test('P2B2B: runtime Search dispatches locally to the pinned handler, preserving
     const tools = createToolDefinitions(runtime)
     assert.equal(tools.length, 6)
     assert(tools.every(tool => tool.capability.action !== 'search'))
-    await assert.rejects(runtime.execute('details'), /KS_DSH_ACTION_INVALID/)
+    // P2B3B supersedes the Details half of this check: Details is now a known
+    // local action and denies an empty dispatch envelope with its own input
+    // code; Overview remains an unknown action.
+    await assert.rejects(runtime.execute('details'), /KS_DSH_DETAILS_INPUT_INVALID/)
     await assert.rejects(runtime.execute('overview'), /KS_DSH_ACTION_INVALID/)
   } finally {
     await runtime.dispose()
@@ -1392,3 +1395,192 @@ function detailsLedgerWithEntry(ledger, entry) {
   body.entries = [entry]
   return detailsSeal(body, 'coverageSha256')
 }
+
+// P2B3B: focused oracle for runtime Details dispatch. Reuses the verified
+// P2B3A synthetic Details fixture/oracle: the runtime dispatches Details
+// locally to the pinned vendored two-argument handleObjectDetailsV1(request,
+// projectionInput) (v0.24.0 closure, source commit e092bb0), passes the sealed
+// {request, projectionInput} envelope through untouched (the pinned handler is
+// the single authority for malformed or authority-bearing request or
+// projection-input content and re-derives every authoritative binding from its
+// recomputed projection), and seals the frozen PROJECTED_READ_ONLY result in a
+// v2 result envelope. Details is additive and local only: the six v0.16 paths
+// and the six-tool surface are untouched, Details is never sent to the shared
+// external API, and no Search/Overview/credential/raw-row/SQL/network/mutation
+// surface is added. The sealed handler result (all claims and authority false)
+// is the evidence.
+const DETAILS_EXTERNAL_DENIED = 'KS_DSH_DETAILS_EXTERNAL_DENIED'
+const DETAILS_INPUT_INVALID = 'KS_DSH_DETAILS_INPUT_INVALID'
+const DETAILS_RESPONSE_KEYS = Object.freeze([
+  'schemaVersion', 'requestId', 'action', 'runtime', 'capabilityAttestationDigest', 'result', 'integrity',
+])
+
+test('P2B3B: runtime Details dispatches locally to the pinned two-argument handler, preserving authoritative bindings and the sealed result (every coverage state, mssql and oracle)', async () => {
+  const runtime = await KaleidoSphereRuntime.create({ source: { mode: 'fixture' } })
+  try {
+    for (const engine of DETAILS_ENGINES) {
+      for (const spec of Object.values(DETAILS_STATES)) {
+        const scenario = syntheticDetailsScenario(engine, spec)
+        const value = { request: scenario.request, projectionInput: scenario.projectionInput }
+        const direct = handleObjectDetailsV1(scenario.request, scenario.projectionInput)
+        const out = await runtime.execute('details', value)
+        // Pass-through to the pinned handler: the sealed result is returned
+        // unaltered (byte-identical to a direct dispatch) and re-validated
+        // through the vendored capability contract.
+        assert.deepEqual(out.response.result, direct)
+        assert.equal(canonicalJson(out.response.result), canonicalJson(handleObjectDetailsV1(scenario.request, scenario.projectionInput)))
+        const validated = buildObjectCapabilityContractV1().validateResult(out.response.result, {
+          capabilityId: KS_OBJECT_DETAILS_HANDLER_CAPABILITY,
+          requestSha256: out.response.result.requestSha256,
+          projectionSha256: out.response.result.projectionSha256,
+          bindings: detailsBindingsOf(scenario.projection),
+        })
+        assert.deepEqual(validated, out.response.result)
+        // Preserves the authoritative Details bindings re-derived by the pinned handler.
+        assert.deepEqual(out.response.result.bindings, detailsBindingsOf(scenario.projection))
+        assert.notEqual(out.response.result.bindings, value.request.bindings)
+        assert.equal(out.response.result.projectionSha256, scenario.projection.projectionSha256)
+        // Sealed, deeply frozen v2 result envelope around the pinned result.
+        assertFrozen(out.response)
+        assert.deepEqual(Object.keys(out.response), DETAILS_RESPONSE_KEYS)
+        assert.equal(out.response.schemaVersion, SEARCH_RESULT_SCHEMA)
+        assert.equal(out.response.action, 'details')
+        assert.equal(out.response.requestId, `ks-details-${sha256Digest({ action: 'details', input: value }).slice(7, 31)}`)
+        const attestation = capabilityAttestationV2()
+        assert.deepEqual(out.response.runtime, { product: attestation.product, contract: attestation.contract })
+        assert.equal(out.response.capabilityAttestationDigest, attestation.attestation.digest)
+        assert.equal(out.response.integrity.algorithm, 'sha256-canonical-json')
+        assert.match(out.response.integrity.digest, /^sha256:[a-f0-9]{64}$/)
+        const { integrity, ...body } = out.response
+        assert.equal(sha256Digest(body), out.response.integrity.digest)
+        // No authority: the pinned claims and authority surface stays all false.
+        assert.deepEqual(out.response.result.claims, DETAILS_CLAIMS)
+        assert.deepEqual(out.response.result.authority, DETAILS_AUTHORITY)
+        // Dispatch is deterministic: a repeated dispatch seals an identical envelope.
+        const repeated = await runtime.execute('details', value)
+        assert.equal(canonicalJson(repeated.response), canonicalJson(out.response))
+      }
+    }
+    // Additive: the six closed v0.16 paths, the six-tool surface and the P2B2B
+    // Search dispatch are untouched on the same runtime.
+    const status = await runtime.execute('status')
+    assert.equal(status.response.result.status, 'READY')
+    assert.equal(status.evidence.status, 'succeeded')
+    const analyze = await runtime.execute('analyze')
+    assert.equal(analyze.response.result.evidence.snapshotSha256,
+      '293a896156d8f6269c4ad33e8d632da653ea180d35a4ea5f390b0be52ce3e44a')
+    const readback = await runtime.execute('readback')
+    assert.equal(readback.response.result.catalog.coverageComplete, true)
+    const { sources: searchSources, envelope: searchEnvelope } = syntheticSearchFixture('mssql')
+    const searchValue = validSearchHandlerInput({ engine: 'mssql', sources: searchSources, envelope: searchEnvelope })
+    const searchOut = await runtime.execute('search', searchValue)
+    assert.equal(canonicalJson(searchOut.response.result), canonicalJson(handleObjectSearchV1(searchValue)))
+    const tools = createToolDefinitions(runtime)
+    assert.equal(tools.length, 6)
+    assert(tools.every(tool => tool.capability.action !== 'details'))
+    await assert.rejects(runtime.execute('overview'), /KS_DSH_ACTION_INVALID/)
+  } finally {
+    await runtime.dispose()
+  }
+})
+
+test('P2B3B: malformed envelope and authority-bearing Details input deny through the runtime with pinned codes', async () => {
+  const runtime = await KaleidoSphereRuntime.create({ source: { mode: 'fixture' } })
+  try {
+    const { request, projectionInput, ledger, entry } = syntheticDetailsScenario('mssql', DETAILS_STATES.COMPLETE)
+    const value = { request, projectionInput }
+    const bindings = request.bindings
+    const withEntry = (next) => detailsProjectionInputFor('mssql', { entry: next, ledger: detailsLedgerWithEntry(ledger, next) })
+    const oversized = detailsRawEntry({})
+    oversized.evidenceRefs = Array.from({ length: 17 }, (_, index) => identitySha256({ evidence: index }))
+    const unrelated = detailsLedgerFor('mssql', DETAILS_STATES.COMPLETE, { relationName: 'other_orders' })
+    const cases = [
+      // Envelope-level malformation never reaches the pinned handler.
+      [{}, DETAILS_INPUT_INVALID],
+      [null, DETAILS_INPUT_INVALID],
+      [[request, projectionInput], DETAILS_INPUT_INVALID],
+      [{ request }, DETAILS_INPUT_INVALID],
+      [{ projectionInput }, DETAILS_INPUT_INVALID],
+      [{ ...value, sql: 'SELECT 1' }, DETAILS_INPUT_INVALID],
+      [{ ...value, credentials: 'secret' }, DETAILS_INPUT_INVALID],
+      [{ ...value, callback: 'https://evil.invalid' }, DETAILS_INPUT_INVALID],
+      // Request-level content denies with the pinned handler codes.
+      [{ ...value, request: null }, REQUEST_SURFACE_DENIED],
+      [{ ...value, request: { ...request, sql: 'SELECT 1' } }, REQUEST_SURFACE_DENIED],
+      [{ ...value, request: { ...request, credentials: 'secret' } }, REQUEST_SURFACE_DENIED],
+      [{ ...value, request: { ...request, rawRows: [] } }, REQUEST_SURFACE_DENIED],
+      [{ ...value, request: { ...request, callback: 'https://evil.invalid' } }, REQUEST_SURFACE_DENIED],
+      [{ ...value, request: { ...request, capabilityId: 'bi.object.search.read' } }, DETAILS_REQUEST_IDENTITY_DENIED],
+      [{ ...value, request: { ...request, scope: { schemas: ['other'] } } }, SCOPE_DENIED],
+      [{ ...value, request: { ...request, scope: { schemas: ['../escape'] } } }, SCOPE_DENIED],
+      [{ ...value, request: { ...request, bindings: { ...bindings, dispatchAuthority: true } } }, BINDING_DENIED],
+      [{ ...value, request: { ...request, bindings: { ...bindings, executionAuthority: true } } }, BINDING_DENIED],
+      [{ ...value, request: { ...request, bindings: { ...bindings, mutationAuthority: true } } }, BINDING_DENIED],
+      [{ ...value, request: { ...request, bindings: { ...bindings, sqlAuthority: true } } }, BINDING_DENIED],
+      [{ ...value, request: { ...request, bindings: { ...bindings, claims: { completenessClaimed: true } } } }, BINDING_DENIED],
+      ...Object.keys(bindings).filter((key) => key !== 'engine').map((key) => [
+        { ...value, request: { ...request, bindings: { ...bindings, [key]: hash64('0') } } },
+        BINDING_DENIED,
+      ]),
+      // Hidden and symbol request surfaces deny before any trap executes.
+      [{ ...value, request: (hidden => { const copy = structuredClone(request); Object.defineProperty(copy, 'credentials', { value: 'secret', enumerable: false }); return copy })() }, REQUEST_SURFACE_DENIED],
+      [{ ...value, request: (symbol => { const copy = structuredClone(request); copy[Symbol('secret')] = 'hidden'; return copy })() }, REQUEST_SURFACE_DENIED],
+      // Projection-input-level content denies with the pinned handler codes.
+      [{ ...value, projectionInput: { ...projectionInput, hint: 'select 1' } }, 'DB_OBJECT_DETAILS_INPUT_INVALID'],
+      [{ ...value, projectionInput: { ...projectionInput, objectKey: identitySha256({ missing: true }) } }, 'DB_OBJECT_DETAILS_COVERAGE_MISSING'],
+      [{ ...value, projectionInput: withEntry(detailsRawEntry({ relationName: 'sales--orders' })) }, 'DB_OBJECT_DETAILS_IDENTIFIER_INVALID'],
+      [{ ...value, projectionInput: withEntry(detailsRawEntry({ relationName: 'sales_orders_verified' })) }, 'DB_OBJECT_DETAILS_IDENTIFIER_CLAIM'],
+      [{ ...value, projectionInput: withEntry(oversized) }, 'DB_OBJECT_DETAILS_EVIDENCE_INVALID'],
+      [{ ...value, projectionInput: detailsProjectionInputFor('mssql', {
+        entry, ledger, receipt: detailsReceiptFor('mssql', { entry: unrelated.entry, ledger: unrelated.ledger }),
+      }) }, 'DB_OBJECT_DETAILS_RECEIPT_BINDING_INVALID'],
+    ]
+    for (const [input, code] of cases) {
+      await assert.rejects(runtime.execute('details', input), { code, message: code })
+    }
+    // A Proxy request surface denies before any trap executes.
+    let traps = 0
+    const proxyRequest = new Proxy(request, { getPrototypeOf() { traps += 1; return Object.prototype; } })
+    await assert.rejects(runtime.execute('details', { ...value, request: proxyRequest }),
+      { code: REQUEST_SURFACE_DENIED, message: REQUEST_SURFACE_DENIED })
+    assert.equal(traps, 0)
+    // Denial is fail closed: a denied Details leaves no result and the runtime stays usable.
+    const after = await runtime.execute('details', value)
+    assert.equal(canonicalJson(after.response.result), canonicalJson(handleObjectDetailsV1(request, projectionInput)))
+  } finally {
+    await runtime.dispose()
+  }
+})
+
+test('P2B3B: external runtime mode denies Details locally and never sends it to the shared external API', async () => {
+  const requests = []
+  const server = createServer((request, response) => {
+    requests.push({ method: request.method, url: request.url })
+    if (request.method === 'GET' && request.url === '/v2/capabilities') {
+      response.writeHead(200, { 'content-type': 'application/json' })
+      response.end(JSON.stringify(capabilityAttestationV2()))
+      return
+    }
+    response.writeHead(404).end()
+  })
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
+  const address = server.address()
+  assert(address && typeof address !== 'string')
+  const scenario = syntheticDetailsScenario('mssql', DETAILS_STATES.COMPLETE)
+  const value = { request: scenario.request, projectionInput: scenario.projectionInput }
+  const runtime = await KaleidoSphereRuntime.create({
+    runtimeMode: 'external',
+    external: { baseUrl: `http://127.0.0.1:${address.port}` },
+  })
+  try {
+    // Details is local only: it is outside the v0.16 closed intent set and must
+    // deny before any request leaves the process.
+    await assert.rejects(runtime.execute('details', value),
+      { code: DETAILS_EXTERNAL_DENIED, message: DETAILS_EXTERNAL_DENIED })
+    // Only the create-time attestation fetch touched the network; Details never did.
+    assert.deepEqual(requests, [{ method: 'GET', url: '/v2/capabilities' }])
+  } finally {
+    await runtime.dispose()
+    await new Promise(resolve => server.close(resolve))
+  }
+})
