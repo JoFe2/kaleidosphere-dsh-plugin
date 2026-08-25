@@ -48,11 +48,14 @@ import {
   buildProgressiveMethodRegistry,
   createProgressiveCoverage,
   createProgressiveRun,
+  PROGRESSIVE_RECEIPT_SCHEMA,
+  PROGRESSIVE_RUN_SCHEMA,
 } from '../vendor/kaleidosphere-v0.24.0/services/bi-control/src/db-analyzer/progressive-controller.mjs'
 import {
   KS_OBJECT_CAPABILITY_REQUEST_SCHEMA,
   KS_OBJECT_CAPABILITY_RESULT_SCHEMA,
   buildObjectCapabilityContractV1,
+  getObjectCapabilityBindingProfileV1,
 } from '../vendor/kaleidosphere-v0.24.0/services/bi-agent/src/object-capability-contract-v1.mjs'
 import {
   KS_OBJECT_SEARCH_HANDLER_CAPABILITY_ID,
@@ -68,6 +71,16 @@ import {
   projectObjectDetails,
   verifyObjectDetailsProjection,
 } from '../vendor/kaleidosphere-v0.24.0/services/bi-control/src/db-analyzer/object-details-projection-v1.mjs'
+import {
+  DATABASE_OVERVIEW_HANDLER_CAPABILITY_ID,
+  DATABASE_OVERVIEW_HANDLER_SCHEMA,
+  handleDatabaseOverviewRequestV1,
+} from '../vendor/kaleidosphere-v0.24.0/services/bi-agent/src/database-overview-handler-v1.mjs'
+import {
+  DATABASE_OVERVIEW_PROJECTION_SCHEMA,
+  buildDatabaseOverviewProjection,
+  verifyDatabaseOverviewProjection,
+} from '../vendor/kaleidosphere-v0.24.0/services/bi-control/src/db-analyzer/database-overview-projection-v1.mjs'
 
 const expectedDigests = JSON.parse(await readFile(new URL('./expected-fixture-digests.json', import.meta.url), 'utf8'))
 
@@ -1584,3 +1597,498 @@ test('P2B3B: external runtime mode denies Details locally and never sends it to 
     await new Promise(resolve => server.close(resolve))
   }
 })
+
+// P2B4A: reusable fully synthetic direct Overview-handler fixture and focused
+// happy/negative oracle against the pinned vendored
+// handleDatabaseOverviewRequestV1 (v0.24.0 closure, source commit e092bb0).
+// The oracle is self-contained: the sealed progressive coverage (built
+// through the vendored createProgressiveCoverage), the probe/receipt records
+// in the pinned progressive shape, the run seal (stateSha256) and the
+// capability request are built inline from synthetic literals, so there are
+// no query-pack/profile data-file reads, environment credentials, network
+// access, production runtime edits, or Search/Details fixture reuse. The
+// authoritative bindings are derived independently of the handler: the
+// snapshot and coverage digests come from the vendored
+// buildDatabaseOverviewProjection, the receipt chain is recomputed from the
+// sealed receipts following the pinned chain rule, and the cancellation
+// digest is the pinned identity hash over the receipt chain and the
+// projection's cancellation state. This leaf adds no runtime dispatch: the
+// Overview path is unreachable from KaleidoSphereRuntime, and the pinned
+// contract marks object capabilities a separate-versioned extension with
+// handlerDispatchIncluded false.
+const OVERVIEW_ENGINES = ['mssql', 'oracle']
+const OVERVIEW_INPUT_INVALID = 'DB_OVERVIEW_HANDLER_INPUT_INVALID'
+const OVERVIEW_AUTHORITY_CLAIM_DENIED = 'DB_OVERVIEW_HANDLER_AUTHORITY_CLAIM_DENIED'
+const OVERVIEW_REQUEST_SURFACE_DENIED = 'KS_OBJECT_CAPABILITY_REQUEST_SURFACE_DENIED'
+const OVERVIEW_REQUEST_IDENTITY_DENIED = 'KS_OBJECT_CAPABILITY_REQUEST_IDENTITY_DENIED'
+const OVERVIEW_BINDING_DENIED = 'KS_OBJECT_CAPABILITY_BINDING_DENIED'
+const OVERVIEW_SCOPE_DENIED = 'KS_OBJECT_CAPABILITY_SCOPE_DENIED'
+const OVERVIEW_CLAIM_DENIED = 'KS_OBJECT_CAPABILITY_CLAIM_DENIED'
+const OVERVIEW_AUTHORITY_DENIED = 'KS_OBJECT_CAPABILITY_AUTHORITY_DENIED'
+const OVERVIEW_BINDING_PROFILE_SCHEMA = 'kaleidosphere.object-capabilities/binding-profile/database-overview/v1'
+const OVERVIEW_BINDING_KEYS = Object.freeze(['engine', 'runStateSha256', 'snapshotSha256', 'coverageSha256', 'receiptChainSha256', 'cancellationSha256'])
+const OVERVIEW_RESULT_KEYS = Object.freeze(['bytes', 'capabilityId', 'envelope', 'projectionSha256', 'requestSha256', 'resultSha256', 'schemaVersion', 'state'])
+const OVERVIEW_CONTRACT_FAIL_CLOSED_CODES = Object.freeze([
+  'KS_OBJECT_CAPABILITY_REQUEST_SURFACE_DENIED', 'KS_OBJECT_CAPABILITY_REQUEST_IDENTITY_DENIED',
+  'KS_OBJECT_CAPABILITY_BINDING_DENIED', 'KS_OBJECT_CAPABILITY_SCOPE_DENIED',
+  'KS_OBJECT_CAPABILITY_RESULT_SURFACE_DENIED', 'KS_OBJECT_CAPABILITY_RESULT_IDENTITY_DENIED',
+  'KS_OBJECT_CAPABILITY_RESULT_BINDING_DENIED', 'KS_OBJECT_CAPABILITY_CLAIM_DENIED',
+  'KS_OBJECT_CAPABILITY_AUTHORITY_DENIED',
+])
+const OVERVIEW_CLAIMS = Object.freeze({
+  absenceClaimed: false, completenessClaimed: false, replayPreventionClaimed: false, sourceRowsIncluded: false,
+})
+const OVERVIEW_AUTHORITY = Object.freeze({
+  credentialsIncluded: false, dispatchAuthority: false, executionAuthority: false,
+  mutationAuthority: false, queryExecution: false, rawValuesIncluded: false, sqlAuthority: false,
+})
+const deepFreezeValue = (value) => {
+  if (value && typeof value === 'object' && !Object.isFrozen(value)) {
+    Object.values(value).forEach(deepFreezeValue)
+    Object.freeze(value)
+  }
+  return value
+}
+
+test('P2B4A: pinned handleDatabaseOverviewRequestV1 returns a deterministic deeply frozen read-only envelope bound to the independently derived Overview bindings (mssql and oracle, with and without a cancelled receipt)', () => {
+  for (const engine of OVERVIEW_ENGINES) {
+    for (const withCancelledReceipt of [true, false]) {
+      const {run, projection, bindings, request} = syntheticOverviewScenario(engine, {withCancelledReceipt})
+      const result = handleDatabaseOverviewRequestV1(request, deepFreezeValue(run))
+      assert.equal(result.schemaVersion, DATABASE_OVERVIEW_HANDLER_SCHEMA)
+      assert.equal(result.capabilityId, DATABASE_OVERVIEW_HANDLER_CAPABILITY_ID)
+      assert.equal(result.state, 'PROJECTED_READ_ONLY')
+      assert.deepEqual(Object.keys(result).sort(), [...OVERVIEW_RESULT_KEYS])
+      assert.equal(result.requestSha256, identitySha256(request))
+      assert.equal(result.projectionSha256, projection.projectionSha256)
+      assert.equal(result.resultSha256, identitySha256(result.envelope))
+      assert.equal(result.envelope.schemaVersion, KS_OBJECT_CAPABILITY_RESULT_SCHEMA)
+      assert.equal(result.envelope.state, 'PROJECTED_READ_ONLY')
+      assert.equal(result.envelope.capabilityId, DATABASE_OVERVIEW_HANDLER_CAPABILITY_ID)
+      assert.equal(result.envelope.requestSha256, result.requestSha256)
+      assert.equal(result.envelope.projectionSha256, projection.projectionSha256)
+      assert.deepEqual(result.envelope.bindings, bindings)
+      // The authoritative bindings equal the independently derived
+      // vendored projection and pinned identities.
+      assert.equal(result.envelope.bindings.engine, run.engine)
+      assert.equal(result.envelope.bindings.runStateSha256, run.stateSha256)
+      assert.equal(result.envelope.bindings.snapshotSha256, projection.bindings.inventorySnapshotSha256)
+      assert.equal(result.envelope.bindings.coverageSha256, projection.bindings.coverageSha256)
+      assert.equal(result.envelope.bindings.receiptChainSha256, projection.bindings.receiptChainSha256)
+      assert.equal(result.envelope.bindings.cancellationSha256, identitySha256({
+        schemaVersion: 'kaleidosphere.object-capabilities/cancellation-binding/v1',
+        receiptChainSha256: projection.bindings.receiptChainSha256,
+        cancellation: projection.cancellation,
+      }))
+      assert.deepEqual(result.envelope.claims, OVERVIEW_CLAIMS)
+      assert.deepEqual(result.envelope.authority, OVERVIEW_AUTHORITY)
+      assert.equal(result.bytes.request, canonicalJson(request))
+      assert.equal(result.bytes.projection, canonicalJson(projection))
+      assert.equal(result.bytes.result, canonicalJson(result.envelope))
+      // The projection is the vendored sealed read-only analysis projection.
+      verifyDatabaseOverviewProjection(projection, run)
+      assert.equal(projection.schemaVersion, DATABASE_OVERVIEW_PROJECTION_SCHEMA)
+      assert.equal(projection.projectionKind, 'DATABASE_OVERVIEW')
+      const byKind = Object.fromEntries(projection.countsByKind.map((item) => [item.kind, item]))
+      assert.equal(byKind.SCHEMA.visibleCount, 1)
+      assert.equal(byKind.RELATION.visibleCount, 1)
+      assert.equal(byKind.COLUMN.partialCount, 1)
+      assert.equal(byKind.INDEX.deniedCount, 1)
+      assert.equal(byKind.SEQUENCE.unknownCount, 1)
+      assert.deepEqual(projection.totals, {visibleCount: 2, partialCount: 1, deniedCount: 1, unsupportedCount: 0, unknownCount: 1, totalCount: 5})
+      assert.equal(projection.coverageBasisPoints, 8000)
+      assert.deepEqual(projection.blindSpotCodes, ['OBJECT_NOT_FOUND', 'PARTIAL_ROW_LIMIT', 'PRIVILEGE_DENIED'])
+      assert.deepEqual(projection.cancellation, withCancelledReceipt
+        ? {state: 'CANCELLED', cancelledReceiptCount: 1, receiptCount: 2}
+        : {state: 'NOT_CANCELLED', cancelledReceiptCount: 0, receiptCount: 1})
+      assert.deepEqual(projection.claims, {absence: false, businessTruth: false, completeness: false})
+      assert.deepEqual(projection.authority, {dispatchAuthority: 'NONE', mutationAuthority: 'NONE', sqlAuthority: 'NONE'})
+      assertFrozen(result)
+      assertFrozen(run)
+      // The sealed result re-verifies against the pinned contract.
+      const {validateResult} = buildObjectCapabilityContractV1()
+      assert.deepEqual(validateResult(result.envelope, {
+        capabilityId: result.capabilityId,
+        requestSha256: result.requestSha256,
+        projectionSha256: result.projectionSha256,
+        bindings,
+      }), result.envelope)
+      // Deterministic across a fresh independent run instance.
+      const repeated = syntheticOverviewScenario(engine, {withCancelledReceipt})
+      assert.equal(canonicalJson(handleDatabaseOverviewRequestV1(repeated.request, deepFreezeValue(repeated.run))), canonicalJson(result))
+    }
+  }
+})
+
+test('P2B4A: the pinned handler and contract expose the closed read-only Overview capability surface without runtime dispatch', async () => {
+  assert.equal(DATABASE_OVERVIEW_HANDLER_CAPABILITY_ID, 'bi.database.overview.read')
+  assert.equal(DATABASE_OVERVIEW_HANDLER_SCHEMA, 'kaleidosphere.object-capabilities/database-overview-handler/v1')
+  assert.equal(DATABASE_OVERVIEW_PROJECTION_SCHEMA, 'kaleidosphere.analysis/database-overview-projection/v1')
+  const profile = getObjectCapabilityBindingProfileV1(DATABASE_OVERVIEW_HANDLER_CAPABILITY_ID)
+  assert.equal(profile.schemaVersion, OVERVIEW_BINDING_PROFILE_SCHEMA)
+  assert.deepEqual([...profile.requiredBindings], [...OVERVIEW_BINDING_KEYS])
+  assert.ok(Object.isFrozen(profile))
+  const contract = buildObjectCapabilityContractV1()
+  assert.deepEqual(contract.failClosedCodes, [...OVERVIEW_CONTRACT_FAIL_CLOSED_CODES])
+  assert.deepEqual(contract.integration, {
+    mode: 'separate-versioned-extension',
+    externalApiV2Changed: false,
+    externalApiV2Actions: ['status', 'discovery', 'analyze', 'plan', 'preview', 'readback'],
+  })
+  assert.equal(contract.boundaries.handlerDispatchIncluded, false)
+  assert.equal(contract.boundaries.freeSqlAccepted, false)
+  assert.equal(contract.boundaries.rawRowsAccepted, false)
+  assert.equal(contract.boundaries.mutationAuthority, false)
+  // P2B4A-NO-RUNTIME: the local runtime adds no Overview dispatch or
+  // authority in this leaf: 'overview' is not an action of the six-intent
+  // closed surface and no exposed tool name carries Overview.
+  const runtime = await KaleidoSphereRuntime.create()
+  try {
+    await assert.rejects(runtime.execute('overview', {}),
+      { code: 'KS_DSH_ACTION_INVALID', message: 'KS_DSH_ACTION_INVALID' })
+    const toolNames = createToolDefinitions(runtime).map((tool) => tool.name)
+    assert.ok(toolNames.every((name) => !name.includes('overview')), 'no Overview tool surface')
+    assert.deepEqual([...toolNames].sort(), [...CLOSED_INTENTS.map((action) => TOOL_NAMES[action])].sort())
+  } finally {
+    await runtime.dispose()
+  }
+})
+
+test('P2B4A: capability, schema, request id, scope, stale and unknown-binding requests deny with the pinned codes against an unchanged run', () => {
+  const {run, request} = syntheticOverviewScenario('mssql', {withCancelledReceipt: true})
+  const frozen = deepFreezeValue(run)
+  for (const [field, value] of [['sql', 'SELECT 1'], ['credentials', 'secret'], ['rawRows', []], ['callback', 'https://evil.invalid']]) {
+    assert.throws(() => handleDatabaseOverviewRequestV1({...request, [field]: value}, frozen),
+      {code: OVERVIEW_REQUEST_SURFACE_DENIED, message: OVERVIEW_REQUEST_SURFACE_DENIED})
+  }
+  const substitutions = [
+    [(next) => ({...next, capabilityId: 'bi.object.details.read'}), OVERVIEW_REQUEST_IDENTITY_DENIED],
+    [(next) => ({...next, schemaVersion: 'kaleidosphere.object-capabilities/request/v2'}), OVERVIEW_REQUEST_IDENTITY_DENIED],
+    [(next) => ({...next, requestId: '!invalid'}), OVERVIEW_REQUEST_IDENTITY_DENIED],
+    [(next) => ({...next, scope: {schemas: ['other']}}), OVERVIEW_SCOPE_DENIED],
+    ...Object.keys(request.bindings).filter((key) => key !== 'engine').map((key) => [
+      (next) => ({...next, bindings: {...next.bindings, [key]: hash64('0')}}), OVERVIEW_BINDING_DENIED,
+    ]),
+    [(next) => ({...next, bindings: {...next.bindings, engine: 'postgres'}}), OVERVIEW_BINDING_DENIED],
+    [(next) => ({...next, bindings: {...next.bindings, extraBinding: hash64('1')}}), OVERVIEW_BINDING_DENIED],
+  ]
+  for (const [mutate, code] of substitutions) {
+    assert.throws(() => handleDatabaseOverviewRequestV1(mutate(request), frozen), {code, message: code})
+  }
+  // Stale request: same capability and scope but bindings derived from a
+  // different run (no cancelled receipt), i.e. no binding in the request
+  // matches the authoritative projection of the frozen run.
+  const stale = syntheticOverviewScenario('mssql', {withCancelledReceipt: false})
+  assert.throws(() => handleDatabaseOverviewRequestV1(stale.request, frozen),
+    {code: OVERVIEW_BINDING_DENIED, message: OVERVIEW_BINDING_DENIED})
+})
+
+test('P2B4A: non-frozen, Proxy, accessor, hidden, symbol and authority-bearing runs deny with the pinned handler codes before any effect', () => {
+  const {run, request} = syntheticOverviewScenario('mssql', {withCancelledReceipt: true})
+  // The handler requires the run itself to be deeply frozen.
+  assert.throws(() => handleDatabaseOverviewRequestV1(request, run),
+    {code: OVERVIEW_INPUT_INVALID, message: OVERVIEW_INPUT_INVALID})
+  const topOnlyFrozen = structuredClone(run)
+  Object.freeze(topOnlyFrozen)
+  assert.throws(() => handleDatabaseOverviewRequestV1(request, topOnlyFrozen),
+    {code: OVERVIEW_INPUT_INVALID, message: OVERVIEW_INPUT_INVALID})
+  // Proxy: denied before any trap executes.
+  let traps = 0
+  const proxy = new Proxy(structuredClone(run), {getPrototypeOf() { traps += 1; return Object.prototype; }})
+  assert.throws(() => handleDatabaseOverviewRequestV1(request, proxy),
+    {code: OVERVIEW_INPUT_INVALID, message: OVERVIEW_INPUT_INVALID})
+  assert.equal(traps, 0)
+  // Hidden (non-enumerable) run field.
+  const hidden = structuredClone(run)
+  Object.defineProperty(hidden, 'sqlAuthority', {value: 'ALL', enumerable: false})
+  assert.throws(() => handleDatabaseOverviewRequestV1(request, hidden),
+    {code: OVERVIEW_INPUT_INVALID, message: OVERVIEW_INPUT_INVALID})
+  // Symbol-keyed run field.
+  const symbol = structuredClone(run)
+  symbol[Symbol('probe')] = 'hidden'
+  assert.throws(() => handleDatabaseOverviewRequestV1(request, symbol),
+    {code: OVERVIEW_INPUT_INVALID, message: OVERVIEW_INPUT_INVALID})
+  // Accessor (getter) run field: denied before the getter executes.
+  let getterCalls = 0
+  const accessor = structuredClone(run)
+  Object.defineProperty(accessor.coverage, 'entries', {
+    enumerable: true,
+    get() { getterCalls += 1; return run.coverage.entries; },
+  })
+  assert.throws(() => handleDatabaseOverviewRequestV1(request, accessor),
+    {code: OVERVIEW_INPUT_INVALID, message: OVERVIEW_INPUT_INVALID})
+  assert.equal(getterCalls, 0)
+  // Authority/claim-bearing run fields deny even on a frozen run.
+  for (const field of ['authority', 'claims']) {
+    const bearing = deepFreezeValue({...structuredClone(run), [field]: {sqlAuthority: 'ALL'}})
+    assert.throws(() => handleDatabaseOverviewRequestV1(request, bearing),
+      {code: OVERVIEW_AUTHORITY_CLAIM_DENIED, message: OVERVIEW_AUTHORITY_CLAIM_DENIED})
+  }
+})
+
+test('P2B4A: tampered, drifted, unsafe and internally inconsistent synthetic runs deny with the exact pinned projection codes', () => {
+  const {run, request} = syntheticOverviewScenario('mssql', {withCancelledReceipt: true})
+  const mutatedRun = (mutate) => {
+    const value = structuredClone(run)
+    mutate(value)
+    return deepFreezeValue(value)
+  }
+  const resealedRun = (mutate) => {
+    const value = structuredClone(run)
+    mutate(value)
+    const {stateSha256: _old, ...body} = value
+    return deepFreezeValue({...body, stateSha256: identitySha256(body)})
+  }
+  const expectRunDenial = (code, frozenRun) => {
+    assert.throws(() => handleDatabaseOverviewRequestV1(request, frozenRun), {code, message: code})
+  }
+  const resealCoverage = (coverage, mutate) => {
+    const {coverageSha256: _old, ...rest} = coverage
+    mutate(rest)
+    return overviewSeal(rest, 'coverageSha256')
+  }
+  // A re-sealed coverage has a new digest: keep the probe and receipt
+  // coverage binding consistent so the mutation is tested exactly where it
+  // is meant to deny (totals and blind-spot checks, not probe validation).
+  const rebindCoverageDigest = (value, coverage) => {
+    for (const probe of value.probes) probe.coverageSha256 = coverage.coverageSha256
+    for (const receipt of value.receipts) {
+      const {receiptSha256: _old, ...rest} = receipt
+      rest.coverageSha256 = coverage.coverageSha256
+      Object.assign(receipt, overviewSeal(rest, 'receiptSha256'))
+    }
+  }
+
+  // Broken run seal: the body changed but the pinned stateSha256 did not.
+  expectRunDenial('DB_OVERVIEW_RUN_TAMPERED', mutatedRun((value) => { value.scope.schemas.push('other') }))
+  // Unsafe JSON surface: a denied key and a denied string value.
+  expectRunDenial('DB_OVERVIEW_UNSAFE_JSON', mutatedRun((value) => { value.sql = 'SELECT 1' }))
+  expectRunDenial('DB_OVERVIEW_UNSAFE_JSON', mutatedRun((value) => { value.runId = 'https://evil.invalid' }))
+  // Claim-bearing identifier (re-sealed so the run seal passes first).
+  expectRunDenial('DB_OVERVIEW_CLAIM_BEARING_IDENTIFIER', resealedRun((value) => {
+    value.scope.database = 'trusted_sales'
+    value.scopeSha256 = identitySha256(value.scope)
+  }))
+  // Malformed run: a sealed required array is missing.
+  expectRunDenial('DB_OVERVIEW_SOURCE_INVALID', resealedRun((value) => { delete value.probes }))
+  // Broken coverage seal: the entry state changed but coverageSha256 did not.
+  expectRunDenial('DB_OVERVIEW_COVERAGE_TAMPERED', resealedRun((value) => { value.coverage.entries[0].state = 'DENIED' }))
+  // Evidence binding and engine drift.
+  expectRunDenial('DB_OVERVIEW_BINDING_DRIFT', resealedRun((value) => {
+    value.evidenceBinding.structureSnapshotSha256 = hash64('f')
+  }))
+  expectRunDenial('DB_OVERVIEW_BINDING_DRIFT', resealedRun((value) => { value.engine = 'oracle' }))
+  // Coverage entry and query tampering (coverage re-sealed).
+  expectRunDenial('DB_OVERVIEW_COVERAGE_INVALID', resealedRun((value) => {
+    value.coverage = resealCoverage(value.coverage, (cov) => { cov.entries[0].objectKey = hash64('0') })
+  }))
+  expectRunDenial('DB_OVERVIEW_COVERAGE_INVALID', resealedRun((value) => {
+    value.coverage = resealCoverage(value.coverage, (cov) => { cov.entries[0].hint = 1 })
+  }))
+  expectRunDenial('DB_OVERVIEW_COVERAGE_INVALID', resealedRun((value) => {
+    value.coverage = resealCoverage(value.coverage, (cov) => { cov.queryCoverage.push({...cov.queryCoverage[0]}) })
+  }))
+  // Summary tampering passes the source checks but not the totals check.
+  expectRunDenial('DB_OVERVIEW_TOTALS_INCONSISTENT', resealedRun((value) => {
+    value.coverage = resealCoverage(value.coverage, (cov) => { cov.summary.coverageBps = 9999 })
+    rebindCoverageDigest(value, value.coverage)
+  }))
+  // A query state outside the pinned states yields an invalid blind-spot code.
+  expectRunDenial('DB_OVERVIEW_BLIND_SPOT_CODE_INVALID', resealedRun((value) => {
+    value.coverage = resealCoverage(value.coverage, (cov) => {
+      const query = cov.queryCoverage.find((entry) => entry.queryId.endsWith('structure-columns'))
+      query.state = 'weird state'
+      query.reasonCode = null
+    })
+    rebindCoverageDigest(value, value.coverage)
+  }))
+  // Probe tampering: duplicate probe key and drifted coverage digest.
+  expectRunDenial('DB_OVERVIEW_PROBE_INVALID', resealedRun((value) => {
+    value.probes.push(structuredClone(value.probes[0]))
+  }))
+  expectRunDenial('DB_OVERVIEW_PROBE_INVALID', resealedRun((value) => {
+    value.probes[0].coverageSha256 = hash64('9')
+  }))
+  // Broken receipt seal: the result state changed but receiptSha256 did not.
+  expectRunDenial('DB_OVERVIEW_RECEIPT_TAMPERED', resealedRun((value) => {
+    value.receipts[0].resultState = 'DENIED'
+  }))
+  // Receipt drift against its probe (receipt re-sealed).
+  const resealReceipt = (index, mutate) => resealedRun((value) => {
+    const {receiptSha256: _old, ...rest} = value.receipts[index]
+    mutate(rest)
+    value.receipts = value.receipts.map((entry, i) => (i === index ? overviewSeal(rest, 'receiptSha256') : entry))
+  })
+  expectRunDenial('DB_OVERVIEW_RECEIPT_INVALID', resealReceipt(0, (receipt) => { receipt.runId = 'other-run' }))
+  expectRunDenial('DB_OVERVIEW_RECEIPT_INVALID', resealReceipt(0, (receipt) => { receipt.methodRef = 'oracle.other@overview-v1' }))
+  expectRunDenial('DB_OVERVIEW_RECEIPT_INVALID', resealReceipt(0, (receipt) => { receipt.phase = 'PRIORITIZATION' }))
+  expectRunDenial('DB_OVERVIEW_RECEIPT_INVALID', resealReceipt(0, (receipt) => { receipt.target = {kind: 'SCOPE', extra: true} }))
+  expectRunDenial('DB_OVERVIEW_RECEIPT_INVALID', resealReceipt(0, (receipt) => { receipt.argumentsSha256 = hash64('b') }))
+  expectRunDenial('DB_OVERVIEW_RECEIPT_INVALID', resealReceipt(0, (receipt) => { receipt.blindRetryAllowed = true }))
+  expectRunDenial('DB_OVERVIEW_RECEIPT_INVALID', resealReceipt(0, (receipt) => { receipt.probeKey = hash64('c') }))
+  expectRunDenial('DB_OVERVIEW_RECEIPT_INVALID', resealedRun((value) => {
+    value.receipts.push(structuredClone(value.receipts[0]))
+  }))
+})
+
+test('P2B4A: re-digested and broken overview projections and every result authority widening deny with the pinned codes', () => {
+  const {run, projection, request} = syntheticOverviewScenario('mssql', {withCancelledReceipt: true})
+  const frozen = deepFreezeValue(run)
+  const broken = structuredClone(projection)
+  broken.totals.totalCount = 6
+  assert.throws(() => verifyDatabaseOverviewProjection(broken, frozen),
+    {code: 'DB_OVERVIEW_PROJECTION_TAMPERED', message: 'DB_OVERVIEW_PROJECTION_TAMPERED'})
+  const {projectionSha256: _old, ...projectionBody} = structuredClone(projection)
+  projectionBody.totals.totalCount = 6
+  const forged = {...projectionBody, projectionSha256: identitySha256(projectionBody)}
+  assert.throws(() => verifyDatabaseOverviewProjection(forged, frozen),
+    {code: 'DB_OVERVIEW_PROJECTION_MISMATCH', message: 'DB_OVERVIEW_PROJECTION_MISMATCH'})
+
+  const result = handleDatabaseOverviewRequestV1(request, frozen)
+  const expected = {
+    capabilityId: result.capabilityId,
+    requestSha256: result.requestSha256,
+    projectionSha256: result.projectionSha256,
+    bindings: result.envelope.bindings,
+  }
+  const {validateResult} = buildObjectCapabilityContractV1()
+  assert.deepEqual(validateResult(result.envelope, expected), result.envelope)
+  const widenings = [
+    [{...result.envelope, claims: {...result.envelope.claims, completenessClaimed: true}}, OVERVIEW_CLAIM_DENIED],
+    [{...result.envelope, claims: {...result.envelope.claims, sourceRowsIncluded: true}}, OVERVIEW_CLAIM_DENIED],
+    [{...result.envelope, authority: {...result.envelope.authority, dispatchAuthority: true}}, OVERVIEW_AUTHORITY_DENIED],
+    [{...result.envelope, authority: {...result.envelope.authority, executionAuthority: true}}, OVERVIEW_AUTHORITY_DENIED],
+    [{...result.envelope, authority: {...result.envelope.authority, mutationAuthority: true}}, OVERVIEW_AUTHORITY_DENIED],
+    [{...result.envelope, authority: {...result.envelope.authority, sqlAuthority: true}}, OVERVIEW_AUTHORITY_DENIED],
+    [{...result.envelope, authority: {...result.envelope.authority, rawValuesIncluded: true}}, OVERVIEW_AUTHORITY_DENIED],
+  ]
+  for (const [changed, code] of widenings) assert.throws(() => validateResult(changed, expected), {code, message: code})
+})
+
+// Fully synthetic fixture builders for the direct Overview handler oracle
+// above. Every input is constructed inline from synthetic literals: a sealed
+// progressive coverage built through the vendored createProgressiveCoverage,
+// probe/receipt records in the pinned progressive shape, a run sealed with
+// stateSha256, and the capability request bound to the independently derived
+// authoritative bindings. No query-pack/profile files are read and no
+// environment is consulted.
+const OVERVIEW_SCOPES = {
+  mssql: {database: 'Analytics', container: null, schemas: ['dbo']},
+  oracle: {database: 'FREE', container: 'FREEPDB1', schemas: ['BI_DEMO']},
+}
+const OVERVIEW_PROBE_PHASE = 'BREADTH_INVENTORY'
+
+const overviewSeal = (body, key) => {
+  const normalized = normalizeJsonValue(body)
+  return {...normalized, [key]: identitySha256(normalized)}
+}
+
+function syntheticOverviewScenario(engine, {withCancelledReceipt = true} = {}) {
+  const scope = structuredClone(OVERVIEW_SCOPES[engine])
+  const scopeSha256 = identitySha256(scope)
+  const structureSnapshotSha256 = identitySha256({kind: 'overview-structure-snapshot', engine})
+  const structureCoverageLedgerSha256 = identitySha256({kind: 'overview-structure-coverage-ledger', engine})
+  const objectId = (name) => identitySha256({kind: 'overview-inventory-object', engine, name})
+  const objectRef = (kind, {schemaName = null, relationName = null, columnName = null, objectName = null, id}) => ({
+    kind, schemaName, relationName, columnName, objectName, sourceObjectSha256: objectId(id),
+  })
+  const schemaName = scope.schemas[0]
+  const entryRefs = (id) => [...new Set([structureSnapshotSha256, structureCoverageLedgerSha256, objectId(id)])].sort()
+  const entries = [
+    {
+      objectRef: objectRef('SCHEMA', {objectName: schemaName, id: `schema-${schemaName}`}),
+      state: 'COMPLETE', reasonCode: null, sourceQueryId: `${engine}.structure-schemas`, evidenceRefs: entryRefs(`schema-${schemaName}`),
+    },
+    {
+      objectRef: objectRef('RELATION', {schemaName, relationName: 'sales_orders', id: `relation-sales_orders`}),
+      state: 'COMPLETE', reasonCode: null, sourceQueryId: `${engine}.structure-relations`, evidenceRefs: entryRefs('relation-sales_orders'),
+    },
+    {
+      objectRef: objectRef('COLUMN', {schemaName, relationName: 'sales_orders', columnName: 'order_id', id: 'column-order_id'}),
+      state: 'PARTIAL', reasonCode: 'PARTIAL_ROW_LIMIT', sourceQueryId: `${engine}.structure-columns`, evidenceRefs: entryRefs('column-order_id'),
+    },
+    {
+      objectRef: objectRef('INDEX', {schemaName, relationName: 'sales_orders', objectName: 'ix_sales_orders', id: 'index-ix_sales_orders'}),
+      state: 'DENIED', reasonCode: 'PRIVILEGE_DENIED', sourceQueryId: `${engine}.structure-indexes`, evidenceRefs: entryRefs('index-ix_sales_orders'),
+    },
+    {
+      objectRef: objectRef('SEQUENCE', {schemaName, objectName: 'seq_sales_orders', id: 'sequence-seq_sales_orders'}),
+      state: 'UNKNOWN', reasonCode: 'OBJECT_NOT_FOUND', sourceQueryId: `${engine}.structure-sequences`, evidenceRefs: entryRefs('sequence-seq_sales_orders'),
+    },
+  ]
+  const queryCoverage = [
+    {queryId: `${engine}.structure-schemas`, category: 'schemas', state: 'SUCCEEDED', reasonCode: null, visibility: 'VISIBLE_COMPLETE', absenceClaim: 'NOT_CLAIMED'},
+    {queryId: `${engine}.structure-columns`, category: 'columns', state: 'SUCCEEDED', reasonCode: null, visibility: 'VISIBLE_COMPLETE', absenceClaim: 'NOT_CLAIMED'},
+  ]
+  const coverage = createProgressiveCoverage({
+    engine,
+    structureSnapshotSha256,
+    structureCoverageLedgerSha256,
+    entries,
+    queryCoverage,
+  })
+  const runId = `overview-${engine}-run`
+  const probeCount = withCancelledReceipt ? 2 : 1
+  const probes = Array.from({length: probeCount}, (_, index) => ({
+    probeKey: identitySha256({kind: 'overview-probe', engine, index}),
+    methodRef: `${engine}.structure-schemas@overview-v1`,
+    phase: OVERVIEW_PROBE_PHASE,
+    target: {kind: 'SCOPE'},
+    arguments: {},
+    coverageSha256: coverage.coverageSha256,
+  }))
+  const receipts = probes.map((probe, index) => overviewSeal({
+    schemaVersion: PROGRESSIVE_RECEIPT_SCHEMA,
+    runId,
+    scopeSha256,
+    probeKey: probe.probeKey,
+    methodRef: probe.methodRef,
+    phase: probe.phase,
+    target: probe.target,
+    argumentsSha256: identitySha256(probe.arguments),
+    coverageSha256: probe.coverageSha256,
+    resultState: withCancelledReceipt && index === 1 ? 'CANCELLED' : 'SUCCEEDED',
+    evidenceRefs: [structureSnapshotSha256, identitySha256({kind: 'overview-receipt-evidence', engine, index})].sort(),
+    blindRetryAllowed: false,
+  }, 'receiptSha256'))
+  const runBody = {
+    schemaVersion: PROGRESSIVE_RUN_SCHEMA,
+    runId,
+    engine,
+    scope,
+    scopeSha256,
+    coverage,
+    evidenceBinding: {
+      structureSnapshotSha256: coverage.structureSnapshotSha256,
+      structureCoverageSha256: coverage.structureCoverageLedgerSha256,
+    },
+    probes,
+    receipts,
+  }
+  const run = {...runBody, stateSha256: identitySha256(runBody)}
+  const projection = buildDatabaseOverviewProjection(run)
+  // Independent derivation of the authoritative Overview bindings: snapshot
+  // and coverage digests from the vendored projection, receipt chain from the
+  // vendored chain rule, cancellation from the pinned identity hash over the
+  // receipt chain and the projection's cancellation state.
+  const bindings = {
+    engine: run.engine,
+    runStateSha256: run.stateSha256,
+    snapshotSha256: projection.bindings.inventorySnapshotSha256,
+    coverageSha256: projection.bindings.coverageSha256,
+    receiptChainSha256: projection.bindings.receiptChainSha256,
+    cancellationSha256: identitySha256({
+      schemaVersion: 'kaleidosphere.object-capabilities/cancellation-binding/v1',
+      receiptChainSha256: projection.bindings.receiptChainSha256,
+      cancellation: projection.cancellation,
+    }),
+  }
+  const request = {
+    schemaVersion: KS_OBJECT_CAPABILITY_REQUEST_SCHEMA,
+    requestId: `overview-${engine}-${withCancelledReceipt ? 'cancelled' : 'complete'}`,
+    capabilityId: DATABASE_OVERVIEW_HANDLER_CAPABILITY_ID,
+    bindings,
+    scope: {schemas: [...scope.schemas]},
+  }
+  return {run, projection, bindings, request}
+}
