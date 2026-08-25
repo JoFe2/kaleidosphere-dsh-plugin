@@ -936,3 +936,169 @@ function validSearchHandlerInput({ engine, sources, envelope, cursor }) {
     projectionInput,
   }
 }
+
+// P2B2B: focused oracle for runtime Search dispatch. Reuses the verified P2B2A
+// synthetic Search fixture/oracle: the runtime dispatches Search locally to the
+// pinned vendored handleObjectSearchV1 (v0.24.0 closure, source commit e092bb0),
+// passes the sealed handler input through untouched (the pinned handler is the
+// single authority for malformed or authority-bearing input and re-derives every
+// binding from its recomputed projection), and seals the frozen PROJECTED_READ_ONLY
+// result in a v2 result envelope. Search is additive and local only: the six v0.16
+// paths and the six-tool surface are untouched, Search is never sent to the shared
+// external API, and no Details/Overview/credential/SQL/network/mutation surface is
+// added. The sealed handler result (all claims and authority false) is the evidence;
+// the v0.16 evidence bridge is fail closed to actions outside the six closed intents
+// by design (the v0.24 contract marks object capabilities a separate-versioned
+// extension with externalApiV2Changed false).
+const SEARCH_RESULT_SCHEMA = 'superset-bi-agent.external/intent-result/v2'
+const SEARCH_EXTERNAL_DENIED = 'KS_DSH_SEARCH_EXTERNAL_DENIED'
+const SEARCH_RESPONSE_KEYS = Object.freeze([
+  'schemaVersion', 'requestId', 'action', 'runtime', 'capabilityAttestationDigest', 'result', 'integrity',
+])
+const REQUEST_SURFACE_DENIED = 'KS_OBJECT_CAPABILITY_REQUEST_SURFACE_DENIED'
+const BINDING_DENIED = 'KS_OBJECT_CAPABILITY_BINDING_DENIED'
+const SCOPE_DENIED = 'KS_OBJECT_CAPABILITY_SCOPE_DENIED'
+
+test('P2B2B: runtime Search dispatches locally to the pinned handler, preserving bindings and the sealed result (mssql and oracle first page and continuation)', async () => {
+  const runtime = await KaleidoSphereRuntime.create({ source: { mode: 'fixture' } })
+  try {
+    for (const engine of ['mssql', 'oracle']) {
+      const { sources, envelope } = syntheticSearchFixture(engine)
+      const cursors = [undefined, buildObjectSearchAuthorityBoundResult({ ...sources, request: envelope }).nextCursor]
+      for (const cursor of cursors) {
+        const value = validSearchHandlerInput({ engine, sources, envelope, cursor })
+        const direct = handleObjectSearchV1(value)
+        const out = await runtime.execute('search', value)
+        // Pass-through to the pinned handler: the sealed result is returned
+        // unaltered (byte-identical to a direct dispatch) and re-validated
+        // through the vendored capability contract.
+        assert.deepEqual(out.response.result, direct)
+        assert.equal(canonicalJson(out.response.result), canonicalJson(handleObjectSearchV1(value)))
+        const validated = buildObjectCapabilityContractV1().validateResult(out.response.result, {
+          capabilityId: SEARCH_CAPABILITY_ID,
+          requestSha256: out.response.result.requestSha256,
+          projectionSha256: out.response.result.projectionSha256,
+          bindings: value.request.bindings,
+        })
+        assert.deepEqual(validated, out.response.result)
+        // Preserves the canonical request bindings of the verified fixture.
+        assert.deepEqual(out.response.result.bindings, value.request.bindings)
+        // Sealed, deeply frozen v2 result envelope around the pinned result.
+        assertFrozen(out.response)
+        assert.deepEqual(Object.keys(out.response), SEARCH_RESPONSE_KEYS)
+        assert.equal(out.response.schemaVersion, SEARCH_RESULT_SCHEMA)
+        assert.equal(out.response.action, 'search')
+        assert.equal(out.response.requestId, `ks-search-${sha256Digest({ action: 'search', input: value }).slice(7, 31)}`)
+        const attestation = capabilityAttestationV2()
+        assert.deepEqual(out.response.runtime, { product: attestation.product, contract: attestation.contract })
+        assert.equal(out.response.capabilityAttestationDigest, attestation.attestation.digest)
+        assert.equal(out.response.integrity.algorithm, 'sha256-canonical-json')
+        assert.match(out.response.integrity.digest, /^sha256:[a-f0-9]{64}$/)
+        const { integrity, ...body } = out.response
+        assert.equal(sha256Digest(body), out.response.integrity.digest)
+        // No authority: the pinned claims and authority surface stays all false.
+        assert.deepEqual(out.response.result.claims, PINNED_SEARCH_CLAIMS)
+        assert.deepEqual(out.response.result.authority, PINNED_SEARCH_AUTHORITY)
+        // Dispatch is deterministic: a repeated dispatch seals an identical envelope.
+        const repeated = await runtime.execute('search', value)
+        assert.equal(canonicalJson(repeated.response), canonicalJson(out.response))
+      }
+    }
+    // Additive: the six closed v0.16 paths and the six-tool surface are untouched.
+    const status = await runtime.execute('status')
+    assert.equal(status.response.result.status, 'READY')
+    assert.equal(status.evidence.status, 'succeeded')
+    const tools = createToolDefinitions(runtime)
+    assert.equal(tools.length, 6)
+    assert(tools.every(tool => tool.capability.action !== 'search'))
+    await assert.rejects(runtime.execute('details'), /KS_DSH_ACTION_INVALID/)
+    await assert.rejects(runtime.execute('overview'), /KS_DSH_ACTION_INVALID/)
+  } finally {
+    await runtime.dispose()
+  }
+})
+
+test('P2B2B: malformed and authority-bearing Search input denies with the pinned handler codes through the runtime', async () => {
+  const runtime = await KaleidoSphereRuntime.create({ source: { mode: 'fixture' } })
+  try {
+    const { sources, envelope } = syntheticSearchFixture('mssql')
+    const value = validSearchHandlerInput({ engine: 'mssql', sources, envelope })
+    const bindings = value.request.bindings
+    const closed = (capabilityId, requestBindings, schemas) => ({
+      schemaVersion: KS_OBJECT_CAPABILITY_REQUEST_SCHEMA,
+      requestId: `handler-${capabilityId.split('.').pop()}`,
+      capabilityId,
+      bindings: requestBindings,
+      scope: { schemas },
+    })
+    const first = buildObjectSearchAuthorityBoundResult({ ...sources, request: envelope })
+    const second = continueObjectSearchAuthorityBoundResult({ ...sources, request: envelope, cursor: first.nextCursor })
+    const cases = [
+      // Absent or wrong-surface handler input never reaches a result.
+      [{}, HANDLER_INPUT_INVALID],
+      [null, HANDLER_INPUT_INVALID],
+      [{ ...value, sql: 'SELECT 1' }, HANDLER_INPUT_INVALID],
+      [{ ...value, credentials: 'secret' }, HANDLER_INPUT_INVALID],
+      [{ ...value, callback: 'https://evil.invalid' }, HANDLER_INPUT_INVALID],
+      [{ ...value, request: null }, REQUEST_SURFACE_DENIED],
+      [{ ...value, request: { ...closed(SEARCH_CAPABILITY_ID, bindings, value.request.scope.schemas), sql: 'SELECT 1' } }, REQUEST_SURFACE_DENIED],
+      [{ ...value, request: { ...closed(SEARCH_CAPABILITY_ID, bindings, value.request.scope.schemas), rawRows: [] } }, REQUEST_SURFACE_DENIED],
+      [{ ...value, request: closed(SEARCH_OTHER_CAPABILITY_ID, bindings, value.request.scope.schemas) }, CAPABILITY_MISMATCH],
+      // Authority-bearing or drifted request bindings deny.
+      [{ ...value, request: closed(SEARCH_CAPABILITY_ID, { ...bindings, dispatchAuthority: true }, value.request.scope.schemas) }, BINDING_DENIED],
+      [{ ...value, request: closed(SEARCH_CAPABILITY_ID, { ...bindings, executionAuthority: true }, value.request.scope.schemas) }, BINDING_DENIED],
+      [{ ...value, request: closed(SEARCH_CAPABILITY_ID, { ...bindings, sqlAuthority: true }, value.request.scope.schemas) }, BINDING_DENIED],
+      [{ ...value, request: closed(SEARCH_CAPABILITY_ID, { ...bindings, claims: { completenessClaimed: true } }, value.request.scope.schemas) }, BINDING_DENIED],
+      [{ ...value, request: closed(SEARCH_CAPABILITY_ID, { ...bindings, objectNameAuthoritySha256: hash64('0') }, value.request.scope.schemas) }, BINDING_DENIED],
+      // Out-of-scope or escaped request scope denies.
+      [{ ...value, request: closed(SEARCH_CAPABILITY_ID, bindings, ['other']) }, SCOPE_DENIED],
+      [{ ...value, request: closed(SEARCH_CAPABILITY_ID, bindings, ['../escape']) }, SCOPE_DENIED],
+      // Substituted or page-mismatched projections and forged projectionInput deny.
+      [{ ...value, projection: second }, FORGED_PROJECTION],
+      [{ ...value, projectionInput: { ...sources, request: envelope, cursor: first.nextCursor } }, FORGED_PROJECTION],
+      [{ ...value, projectionInput: { ...value.projectionInput, sql: 'SELECT 1' } }, FORGED_PROJECTION],
+      [{ ...value, projectionInput: { ...value.projectionInput, credentials: 'secret' } }, FORGED_PROJECTION],
+    ]
+    for (const [input, code] of cases) {
+      await assert.rejects(runtime.execute('search', input), { code, message: code })
+    }
+    // Denial is fail closed: a denied Search leaves no result and the runtime stays usable.
+    const after = await runtime.execute('search', value)
+    assert.equal(canonicalJson(after.response.result), canonicalJson(handleObjectSearchV1(value)))
+  } finally {
+    await runtime.dispose()
+  }
+})
+
+test('P2B2B: external runtime mode denies Search locally and never sends it to the shared external API', async () => {
+  const requests = []
+  const server = createServer((request, response) => {
+    requests.push({ method: request.method, url: request.url })
+    if (request.method === 'GET' && request.url === '/v2/capabilities') {
+      response.writeHead(200, { 'content-type': 'application/json' })
+      response.end(JSON.stringify(capabilityAttestationV2()))
+      return
+    }
+    response.writeHead(404).end()
+  })
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
+  const address = server.address()
+  assert(address && typeof address !== 'string')
+  const { sources, envelope } = syntheticSearchFixture('mssql')
+  const value = validSearchHandlerInput({ engine: 'mssql', sources, envelope })
+  const runtime = await KaleidoSphereRuntime.create({
+    runtimeMode: 'external',
+    external: { baseUrl: `http://127.0.0.1:${address.port}` },
+  })
+  try {
+    // Search is local only: it is outside the v0.16 closed intent set and must
+    // deny before any request leaves the process.
+    await assert.rejects(runtime.execute('search', value),
+      { code: SEARCH_EXTERNAL_DENIED, message: SEARCH_EXTERNAL_DENIED })
+    // Only the create-time attestation fetch touched the network; Search never did.
+    assert.deepEqual(requests, [{ method: 'GET', url: '/v2/capabilities' }])
+  } finally {
+    await runtime.dispose()
+    await new Promise(resolve => server.close(resolve))
+  }
+})
