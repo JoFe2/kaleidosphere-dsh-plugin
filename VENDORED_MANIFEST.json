@@ -7,5 +7,109 @@
   "root": "vendor/kaleidosphere-v0.16.0",
   "fileCount": 73,
   "digestAlgorithm": "sha256(relative-path NUL content NUL, lexicographic paths)",
-  "digest": "f62109b120c0bc677d47ce4ce8e23278a30bacd7bc3555c1f4877d09cefd58a2"
+  "digest": "f62109b120c0bc677d47ce4ce8e23278a30bacd7bc3555c1f4877d09cefd58a2",
+  "v0240": {
+    "schemaVersion": "kaleidosphere.dsh/vendored-handler-closure/v1",
+    "upstream": "https://github.com/JoFe2/KaleidoSphere",
+    "tag": "v0.24.0",
+    "commit": "e092bb0bce039936b88329793b24e9f987ae0ddb",
+    "license": "Apache-2.0",
+    "root": "vendor/kaleidosphere-v0.24.0",
+    "referenceManifestSha256": "2b82ed4ebcfa03b5470fb9583ea98dda991890a6dc6b98b3de2ee4d1455bdd2b",
+    "fileCount": 15,
+    "digestAlgorithm": "sha256(relative-path NUL content NUL, lexicographic paths)",
+    "digest": "1358235bf4144f5d3f3492823f611d09ebe7051e92805a58784f934dd4f01c74",
+    "files": [
+      {
+        "sourceCommit": "e092bb0bce039936b88329793b24e9f987ae0ddb",
+        "sourcePath": "services/bi-agent/src/database-overview-handler-v1.mjs",
+        "vendorPath": "vendor/kaleidosphere-v0.24.0/services/bi-agent/src/database-overview-handler-v1.mjs",
+        "sha256": "e015f9e408b676bdba7f55740b504bb364c66744c3f24e5a60aa938e4ca8f8a1"
+      },
+      {
+        "sourceCommit": "e092bb0bce039936b88329793b24e9f987ae0ddb",
+        "sourcePath": "services/bi-agent/src/external-api-v2.mjs",
+        "vendorPath": "vendor/kaleidosphere-v0.24.0/services/bi-agent/src/external-api-v2.mjs",
+        "sha256": "b11f7162317a38392e41fbf5feda5dd49435fd2248dead2d2276d84a100e3076"
+      },
+      {
+        "sourceCommit": "e092bb0bce039936b88329793b24e9f987ae0ddb",
+        "sourcePath": "services/bi-agent/src/object-capability-contract-v1.mjs",
+        "vendorPath": "vendor/kaleidosphere-v0.24.0/services/bi-agent/src/object-capability-contract-v1.mjs",
+        "sha256": "c68e6aefef42362e1aadaeb0ae23614db38b33b2ef9991b1847be03963efae72"
+      },
+      {
+        "sourceCommit": "e092bb0bce039936b88329793b24e9f987ae0ddb",
+        "sourcePath": "services/bi-agent/src/object-details-handler-v1.mjs",
+        "vendorPath": "vendor/kaleidosphere-v0.24.0/services/bi-agent/src/object-details-handler-v1.mjs",
+        "sha256": "abd5c5256737c8771c50ed7138be5fec4ed92b9fb791f46da6aaba2ec2fd8b79"
+      },
+      {
+        "sourceCommit": "e092bb0bce039936b88329793b24e9f987ae0ddb",
+        "sourcePath": "services/bi-agent/src/object-search-handler-v1.mjs",
+        "vendorPath": "vendor/kaleidosphere-v0.24.0/services/bi-agent/src/object-search-handler-v1.mjs",
+        "sha256": "94e7ba13ca85cc10a407900e0049a9fa86e8dccfb6de8d26f90e50af5b492b37"
+      },
+      {
+        "sourceCommit": "e092bb0bce039936b88329793b24e9f987ae0ddb",
+        "sourcePath": "services/bi-control/src/db-analyzer/core.mjs",
+        "vendorPath": "vendor/kaleidosphere-v0.24.0/services/bi-control/src/db-analyzer/core.mjs",
+        "sha256": "12f331b0e4589fc0a192bec2cc90718c8c266557218f80cb5f3748e15c7ffbb3"
+      },
+      {
+        "sourceCommit": "e092bb0bce039936b88329793b24e9f987ae0ddb",
+        "sourcePath": "services/bi-control/src/db-analyzer/database-overview-projection-v1.mjs",
+        "vendorPath": "vendor/kaleidosphere-v0.24.0/services/bi-control/src/db-analyzer/database-overview-projection-v1.mjs",
+        "sha256": "9ba648295190b7ae1b366010ff404cf41a3b0cd5d55e315f520482ee53d6d270"
+      },
+      {
+        "sourceCommit": "e092bb0bce039936b88329793b24e9f987ae0ddb",
+        "sourcePath": "services/bi-control/src/db-analyzer/object-details-projection-v1.mjs",
+        "vendorPath": "vendor/kaleidosphere-v0.24.0/services/bi-control/src/db-analyzer/object-details-projection-v1.mjs",
+        "sha256": "e09d31c274e80ae21cb41c5934f484cfd25b2dc88acbd22115d0ecb1ce5b91fd"
+      },
+      {
+        "sourceCommit": "e092bb0bce039936b88329793b24e9f987ae0ddb",
+        "sourcePath": "services/bi-control/src/db-analyzer/object-inventory-authority-digest-v1.mjs",
+        "vendorPath": "vendor/kaleidosphere-v0.24.0/services/bi-control/src/db-analyzer/object-inventory-authority-digest-v1.mjs",
+        "sha256": "ae586d113ca686d7955ba40f3447755bf084e7e110f51fbbf08a7fd456cccce7"
+      },
+      {
+        "sourceCommit": "e092bb0bce039936b88329793b24e9f987ae0ddb",
+        "sourcePath": "services/bi-control/src/db-analyzer/object-name-authority-v1.mjs",
+        "vendorPath": "vendor/kaleidosphere-v0.24.0/services/bi-control/src/db-analyzer/object-name-authority-v1.mjs",
+        "sha256": "455aeb181dabf52b4bdab0c12b5635c786a9f141430d3ee23d6e1a7139022f39"
+      },
+      {
+        "sourceCommit": "e092bb0bce039936b88329793b24e9f987ae0ddb",
+        "sourcePath": "services/bi-control/src/db-analyzer/object-relation-kind-authority-v1.mjs",
+        "vendorPath": "vendor/kaleidosphere-v0.24.0/services/bi-control/src/db-analyzer/object-relation-kind-authority-v1.mjs",
+        "sha256": "93fa9f3ed4fb0bb30781ad9e6717429e45f9ea8453af5e74f8d87f72c52f173e"
+      },
+      {
+        "sourceCommit": "e092bb0bce039936b88329793b24e9f987ae0ddb",
+        "sourcePath": "services/bi-control/src/db-analyzer/object-search-authority-bound-result-v1.mjs",
+        "vendorPath": "vendor/kaleidosphere-v0.24.0/services/bi-control/src/db-analyzer/object-search-authority-bound-result-v1.mjs",
+        "sha256": "4e0b9ead811fda94e9e97d0a758bf3b9335f351283b7df9d72e8bfcf1e9298a0"
+      },
+      {
+        "sourceCommit": "e092bb0bce039936b88329793b24e9f987ae0ddb",
+        "sourcePath": "services/bi-control/src/db-analyzer/object-search-envelope-v1.mjs",
+        "vendorPath": "vendor/kaleidosphere-v0.24.0/services/bi-control/src/db-analyzer/object-search-envelope-v1.mjs",
+        "sha256": "cebd170a87c1937abfc12f34b6997629b808a8b0df30f04e88f6520c156ee69c"
+      },
+      {
+        "sourceCommit": "e092bb0bce039936b88329793b24e9f987ae0ddb",
+        "sourcePath": "services/bi-control/src/db-analyzer/progressive-controller.mjs",
+        "vendorPath": "vendor/kaleidosphere-v0.24.0/services/bi-control/src/db-analyzer/progressive-controller.mjs",
+        "sha256": "be3555e25334ad5506a7bd8f2324e6b84dd2a6c1effd820abd1fd9067b428235"
+      },
+      {
+        "sourceCommit": "e092bb0bce039936b88329793b24e9f987ae0ddb",
+        "sourcePath": "services/bi-control/src/db-analyzer/safe-analysis-methods.mjs",
+        "vendorPath": "vendor/kaleidosphere-v0.24.0/services/bi-control/src/db-analyzer/safe-analysis-methods.mjs",
+        "sha256": "b77f0b0347cf6d80a8c8b0e10cac51244c9ad96bc653f3c983f792bdf7647b1a"
+      }
+    ]
+  }
 }
