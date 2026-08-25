@@ -2304,3 +2304,223 @@ test('P2B4B: external runtime mode denies Overview locally and never sends it to
     await new Promise(resolve => server.close(resolve))
   }
 })
+
+// P2B5A: compact integrated authority guard over the combined pinned v0.24.0
+// Search/Details/Overview local surface (v0.24.0 closure, source commit
+// e092bb0). It reuses the verified P2B2B/P2B3B/P2B4B synthetic fixtures and
+// runtime dispatch without reconstructing fixtures or duplicating the
+// exhaustive per-leaf negative matrices, and proves the combined surface is
+// closed (exactly the three pinned v0.24 capabilities are locally
+// dispatchable, absent from the six native tools and the EXTERNAL transport)
+// and carries no authority (the representative sealed outputs and the exposed
+// attestation metadata keep every claim and authority flag false and contain
+// no raw-row, credential, SQL, network, executable or mutation fields). Test
+// only: no production or vendor file is added or modified.
+const P2B5A_LOCAL_CAPABILITIES = Object.freeze([
+  { action: 'search', capabilityId: SEARCH_CAPABILITY_ID, externalDenied: SEARCH_EXTERNAL_DENIED },
+  { action: 'details', capabilityId: KS_OBJECT_DETAILS_HANDLER_CAPABILITY, externalDenied: DETAILS_EXTERNAL_DENIED },
+  { action: 'overview', capabilityId: DATABASE_OVERVIEW_HANDLER_CAPABILITY_ID, externalDenied: OVERVIEW_EXTERNAL_DENIED },
+])
+// Representative alias/authority names for the three capabilities plus generic
+// mutation/execution words: none is a closed intent, and none may be a locally
+// dispatchable action (a compact sweep, not the exhaustive per-leaf matrices).
+const P2B5A_ALIASES = Object.freeze([
+  'Search', 'search-v1', 'object-search', 'objectSearch', 'searchObjects', 'db-search',
+  'Details', 'details-v1', 'object-details', 'objectDetails', 'db-details',
+  'Overview', 'overview-v1', 'database-overview', 'databaseOverview', 'db-overview',
+  'sql', 'query', 'execute', 'run', 'raw', 'rows', 'mutation', 'write',
+])
+// Forbidden field names (exact key match): the raw-row, credential/secret,
+// SQL, network and executable/callback classes. The pinned authority/claim
+// flag names (sqlAuthority, credentialsIncluded, rawValuesIncluded,
+// queryExecution) are deliberately not in this set: they are the pinned
+// all-false flags asserted below, not forbidden surfaces.
+const P2B5A_FORBIDDEN_KEYS = Object.freeze([
+  'raw', 'rawRows', 'raw_rows', 'rows', 'rawData', 'raw_data', 'cells',
+  'credential', 'credentials', 'password', 'passwords', 'passwd', 'secret', 'secrets',
+  'token', 'tokens', 'apiKey', 'api_key', 'accessToken', 'authToken', 'dsn',
+  'connectionString', 'connection_string', 'connection',
+  'sql', 'sqlText', 'statement', 'statements', 'query', 'queries', 'commandText',
+  'url', 'urls', 'uri', 'uris', 'endpoint', 'endpoints', 'baseUrl', 'base_url',
+  'host', 'hostname', 'port', 'protocol', 'ip', 'ips', 'webhook', 'webhooks',
+  'callback', 'callbacks', 'executable', 'executables', 'script', 'scripts',
+  'command', 'commands', 'shell', 'binary',
+])
+// Forbidden content classes for string values (including the Overview bytes.*
+// canonical-JSON payloads, which are scanned as text): URL schemes, IPv4
+// endpoints, localhost, statement-shaped SQL, leading SQL statements,
+// credential/secret words, and exact forbidden JSON key names embedded in a
+// JSON string.
+const P2B5A_FORBIDDEN_VALUE_PATTERNS = Object.freeze([
+  { name: 'url-scheme', pattern: /\b(?:https?|ftp|wss?):\/\//i },
+  { name: 'ipv4-endpoint', pattern: /\b(?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.){3}(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\b/ },
+  { name: 'localhost', pattern: /\blocalhost\b/i },
+  { name: 'sql-statement', pattern: /\b(?:SELECT|INSERT|UPDATE|DELETE|DROP|ALTER|TRUNCATE|MERGE|EXECUTE|EXEC|GRANT|REVOKE|CREATE)\b[^a-z0-9]*(?:FROM|INTO|TABLE|SET|WHERE|GRANT|TO)\b/i },
+  { name: 'leading-sql-statement', pattern: /^\s*(?:SELECT|INSERT|UPDATE|DELETE|DROP|TRUNCATE|EXEC)\b/i },
+  { name: 'credential-word', pattern: /\b(?:passw(?:or)?d|secret|token|bearer|credential|api[-_ ]?key)\b/i },
+  { name: 'embedded-forbidden-key', pattern: /"(?:rawRows|raw_rows|rows|rawData|raw_data|password|passwd|secret|token|apiKey|api_key|accessToken|authToken|credential|credentials|dsn|connectionString|sql|statement|query|url|uri|endpoint|baseUrl|host|hostname|port|protocol|callback|webhook|executable|script|command|function)"\s*:/i },
+])
+// The exposed capability attestation metadata: every boundary is a false
+// authority flag except the named readback-only persistent workflow.
+const P2B5A_ATTESTATION_BOUNDARIES = Object.freeze({
+  sourceDatabaseCredentialsAccepted: false,
+  freeSqlAccepted: false,
+  rawSourceRowsReturned: false,
+  modelMutationAuthority: false,
+  directSupersetMutationIntentAccepted: false,
+  persistentSupersetWorkflow: 'trusted-preview-approval-apply-readback-rollback-only',
+})
+
+function p2b5aRepresentativeValues() {
+  const { sources, envelope } = syntheticSearchFixture('mssql')
+  const search = validSearchHandlerInput({ engine: 'mssql', sources, envelope })
+  const detailsScenario = syntheticDetailsScenario('mssql', DETAILS_STATES.COMPLETE)
+  const details = { request: detailsScenario.request, projectionInput: detailsScenario.projectionInput }
+  const overviewScenario = syntheticOverviewScenario('mssql', { withCancelledReceipt: true })
+  const overview = { request: overviewScenario.request, run: deepFreezeValue(overviewScenario.run) }
+  return { search, details, overview, overviewScenario }
+}
+
+test('P2B5A: the combined pinned v0.24 Search/Details/Overview local surface is closed: exactly three local actions, absent from the six native tools and the EXTERNAL transport', async () => {
+  const values = p2b5aRepresentativeValues()
+  const runtime = await KaleidoSphereRuntime.create({ source: { mode: 'fixture' } })
+  try {
+    // Exactly the three pinned v0.24 capabilities are locally dispatchable,
+    // each sealing its own representative v2 result locally.
+    for (const { action } of P2B5A_LOCAL_CAPABILITIES) {
+      const out = await runtime.execute(action, values[action])
+      assertFrozen(out.response)
+      assert.equal(out.response.schemaVersion, SEARCH_RESULT_SCHEMA)
+      assert.equal(out.response.action, action)
+    }
+    // No other non-intent action is locally dispatchable: a compact
+    // alias/authority sweep denies with the pinned unknown-action code.
+    for (const alias of P2B5A_ALIASES) {
+      assert(!CLOSED_INTENTS.includes(alias), `alias must not be a closed intent: ${alias}`)
+      await assert.rejects(runtime.execute(alias, values.search),
+        { code: 'KS_DSH_ACTION_INVALID', message: 'KS_DSH_ACTION_INVALID' })
+    }
+    // Absent from the six native tools: the tool surface is exactly the six
+    // closed-intent names and carries none of the three v0.24 capabilities.
+    const tools = createToolDefinitions(runtime)
+    assert.deepEqual(tools.map(tool => tool.name), CLOSED_INTENTS.map(action => TOOL_NAMES[action]))
+    assert(tools.every(tool => P2B5A_LOCAL_CAPABILITIES.every(cap =>
+      tool.capability.action !== cap.action && tool.capability.capabilityId !== cap.capabilityId)))
+    // Additive: the six closed intents remain dispatchable on the same runtime.
+    const status = await runtime.execute('status')
+    assert.equal(status.response.result.status, 'READY')
+  } finally {
+    await runtime.dispose()
+  }
+  // Absent from the EXTERNAL transport: one shared loopback server proves all
+  // three deny locally and only the create-time attestation fetch occurred.
+  const requests = []
+  const server = createServer((request, response) => {
+    requests.push({ method: request.method, url: request.url })
+    if (request.method === 'GET' && request.url === '/v2/capabilities') {
+      response.writeHead(200, { 'content-type': 'application/json' })
+      response.end(JSON.stringify(capabilityAttestationV2()))
+      return
+    }
+    response.writeHead(404).end()
+  })
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
+  const address = server.address()
+  assert(address && typeof address !== 'string')
+  const external = await KaleidoSphereRuntime.create({
+    runtimeMode: 'external',
+    external: { baseUrl: `http://127.0.0.1:${address.port}` },
+  })
+  try {
+    for (const { action, externalDenied } of P2B5A_LOCAL_CAPABILITIES) {
+      await assert.rejects(external.execute(action, values[action]),
+        { code: externalDenied, message: externalDenied })
+    }
+    // Only the create-time attestation fetch touched the network; none of the
+    // three capabilities ever reached the shared external API.
+    assert.deepEqual(requests, [{ method: 'GET', url: '/v2/capabilities' }])
+  } finally {
+    await external.dispose()
+    await new Promise(resolve => server.close(resolve))
+  }
+})
+
+test('P2B5A: the integrated sealed outputs and exposed metadata carry no authority: all claims and authority flags false and no raw-row, credential, SQL, network, executable or mutation fields', async () => {
+  const values = p2b5aRepresentativeValues()
+  const runtime = await KaleidoSphereRuntime.create({ source: { mode: 'fixture' } })
+  try {
+    const searchOut = await runtime.execute('search', values.search)
+    const detailsOut = await runtime.execute('details', values.details)
+    const overviewOut = await runtime.execute('overview', values.overview)
+    const attestation = capabilityAttestationV2()
+    // Representative sealed results: the Search/Details results and the
+    // Overview envelope share the pinned 8-key PROJECTED_READ_ONLY surface
+    // with every claim and authority flag false.
+    for (const result of [searchOut.response.result, detailsOut.response.result, overviewOut.response.result.envelope]) {
+      assertFrozen(result)
+      assert.equal(result.state, 'PROJECTED_READ_ONLY')
+      assert.deepEqual(Object.keys(result).sort(), DETAILS_RESULT_KEYS)
+      assert.deepEqual(result.claims, PINNED_SEARCH_CLAIMS)
+      assert.deepEqual(result.authority, PINNED_SEARCH_AUTHORITY)
+      for (const flag of [...Object.values(result.claims), ...Object.values(result.authority)]) {
+        assert.equal(flag, false)
+      }
+    }
+    // The Overview handler result surface is pinned and its bytes.* payloads
+    // round-trip to the exact verified structures (no hidden payload).
+    const overviewResult = overviewOut.response.result
+    assertFrozen(overviewResult)
+    assert.equal(overviewResult.state, 'PROJECTED_READ_ONLY')
+    assert.deepEqual(Object.keys(overviewResult).sort(), OVERVIEW_RESULT_KEYS)
+    assert.deepEqual(JSON.parse(overviewResult.bytes.result), overviewResult.envelope)
+    assert.deepEqual(JSON.parse(overviewResult.bytes.request), values.overview.request)
+    assert.deepEqual(JSON.parse(overviewResult.bytes.projection), values.overviewScenario.projection)
+    // Exposed metadata: the sealed response metadata is pinned and the
+    // attestation the runtime exposes carries only false authority flags.
+    for (const out of [searchOut, detailsOut, overviewOut]) {
+      assertFrozen(out.response)
+      assert.deepEqual(Object.keys(out.response), SEARCH_RESPONSE_KEYS)
+      assert.equal(out.response.schemaVersion, SEARCH_RESULT_SCHEMA)
+      const { integrity, ...body } = out.response
+      assert.equal(sha256Digest(body), out.response.integrity.digest)
+      assert.deepEqual(out.response.runtime, { product: attestation.product, contract: attestation.contract })
+      assert.equal(out.response.capabilityAttestationDigest, attestation.attestation.digest)
+    }
+    // The vendored attestation is shallow-frozen (the v0.16.0 closure
+    // freezes the top-level body only); assert the depth it actually pins.
+    assert(Object.isFrozen(attestation))
+    assert.deepEqual(attestation.boundaries, P2B5A_ATTESTATION_BOUNDARIES)
+    assert.deepEqual(attestation.graph, { acceptedIncumbent: 'adaptive-v1', candidatePromotion: 'none' })
+    // No raw-row, credential, SQL, network, executable or mutation fields:
+    // no forbidden key name at any depth and no forbidden content class in any
+    // string value (including the Overview bytes.* canonical-JSON payloads and
+    // the exposed attestation metadata).
+    const scan = (root, label) => {
+      const keys = new Set()
+      const strings = []
+      const walk = (value) => {
+        if (Array.isArray(value)) { value.forEach(walk); return }
+        if (value && typeof value === 'object') {
+          for (const [key, item] of Object.entries(value)) { keys.add(key); walk(item) }
+          return
+        }
+        if (typeof value === 'string') strings.push(value)
+      }
+      walk(root)
+      for (const key of keys) {
+        assert(!P2B5A_FORBIDDEN_KEYS.includes(key), `${label}: forbidden key "${key}"`)
+      }
+      for (const value of strings) {
+        for (const { name, pattern } of P2B5A_FORBIDDEN_VALUE_PATTERNS) {
+          assert(!pattern.test(value), `${label}: ${name} content in a string value`)
+        }
+      }
+    }
+    for (const [label, out] of [['search', searchOut], ['details', detailsOut], ['overview', overviewOut]]) {
+      scan(out.response, label)
+    }
+    scan(attestation, 'attestation')
+  } finally {
+    await runtime.dispose()
+  }
+})
