@@ -113,9 +113,10 @@ for (const result of active.results) {
 const analyze = active.results.find(result => result.name === 'kaleidosphere_analyze')
 if (analyze?.value?.response?.result?.evidence?.snapshotSha256 !== '293a896156d8f6269c4ad33e8d632da653ea180d35a4ea5f390b0be52ce3e44a') process.exit(1)
 NODE
-node - <<'NODE' "$KS_PROBE_LOCAL_SURFACE" "$KS_PROBE_NEGATIVE_MATRIX"
+node - <<'NODE' "$KS_PROBE_LOCAL_SURFACE" "$KS_PROBE_NEGATIVE_MATRIX" "$dsh_pid"
 const local = require(process.argv[2])
 const matrix = require(process.argv[3])
+const dshPid = Number(process.argv[4])
 const expectedTools = [
   'kaleidosphere_analyze', 'kaleidosphere_discovery', 'kaleidosphere_plan',
   'kaleidosphere_preview', 'kaleidosphere_readback', 'kaleidosphere_status',
@@ -123,7 +124,14 @@ const expectedTools = [
 if (local.engine !== 'mssql' || local.actions.length !== 3) process.exit(1)
 if (JSON.stringify(local.hostSurface.toolNames) !== JSON.stringify(expectedTools)) process.exit(1)
 if (local.hostSurface.capabilities.some(x => ['search', 'details', 'overview'].includes(x.action))) process.exit(1)
+if (local.hostSurface.capabilities.some(x => ['bi.object.search.read', 'bi.object.details.read', 'bi.database.overview.read'].includes(x.capabilityId) || ['Search', 'Details', 'Overview'].includes(x.name))) process.exit(1)
+if (local.executionBinding?.boundary !== 'IN_PLUGIN_PROCESS_LOCAL_RUNTIME_NOT_HOST_TOOL') process.exit(1)
+if (!Number.isSafeInteger(local.executionBinding?.processId) || local.executionBinding.processId !== dshPid) process.exit(1)
+if (!Number.isSafeInteger(local.executionBinding?.generation) || local.hostSchemaNames?.join(',') !== expectedTools.join(',') || !Array.isArray(local.completeHostSchemaNames) || !expectedTools.every(name => local.completeHostSchemaNames.includes(name))) process.exit(1)
 if (matrix.engine !== 'mssql' || matrix.classes.length !== 7 || matrix.cases.length !== 16) process.exit(1)
+if (matrix.executionBinding?.boundary !== 'IN_PLUGIN_PROCESS_LOCAL_RUNTIME_NOT_HOST_TOOL') process.exit(1)
+if (matrix.executionBinding.processId !== local.executionBinding.processId || matrix.executionBinding.generation !== local.executionBinding.generation) process.exit(1)
+if (matrix.hostSchemaNames?.join(',') !== expectedTools.join(',')) process.exit(1)
 if (!matrix.cases.every(x => x.code.startsWith('KS_') || x.code.startsWith('DB_') || x.code === 'AbortError')) process.exit(1)
 NODE
 fixture_digest_snapshot >"$evidence_dir/fixture-digests-after.json"
@@ -133,11 +141,24 @@ cmp "$evidence_dir/fixture-digests-before.json" "$evidence_dir/fixture-digests-a
 printf '%s\n' '- id: kaleidosphere-dsh-plugin' '  disabled: true' >"$profile_dir/cordis.patch.yml"
 : >"$KS_PROBE_UNLOAD_REQUEST"
 wait_for_file "$KS_PROBE_UNLOADED"
+node - <<'NODE' "$KS_PROBE_UNLOADED"
+const x = require(process.argv[2])
+if (x.state !== 'UNLOADED' || !Array.isArray(x.tools) || x.tools.length !== 0 || JSON.stringify(x.hostSchemaNames) !== '[]') process.exit(1)
+if (x.executionBinding?.boundary !== 'IN_PLUGIN_PROCESS_LOCAL_RUNTIME_NOT_HOST_TOOL') process.exit(1)
+NODE
 [[ "$(find "$runtime_tmp" -maxdepth 1 -type d -name 'kaleidosphere-dsh-*' | wc -l)" -eq 0 ]]
 
 printf '[]\n' >"$profile_dir/cordis.patch.yml"
 : >"$KS_PROBE_RELOAD_REQUEST"
 wait_for_file "$KS_PROBE_RELOADED"
+node - <<'NODE' "$KS_PROBE_RELOADED"
+const x = require(process.argv[2])
+const expected = ['kaleidosphere_analyze', 'kaleidosphere_discovery', 'kaleidosphere_plan', 'kaleidosphere_preview', 'kaleidosphere_readback', 'kaleidosphere_status']
+if (x.state !== 'RELOADED' || JSON.stringify(x.tools) !== JSON.stringify(expected) || JSON.stringify(x.hostSchemaNames) !== JSON.stringify(expected)) process.exit(1)
+if (x.executionBinding?.boundary !== 'IN_PLUGIN_PROCESS_LOCAL_RUNTIME_NOT_HOST_TOOL') process.exit(1)
+const status = x.status?.response?.result?.status ?? x.status?.result?.status ?? x.status?.status
+if (typeof status !== 'string' || status.length === 0) process.exit(1)
+NODE
 wait_for_pid "$dsh_pid" 90 dsh
 unset dsh_pid
 [[ -f "$KS_PROBE_DISPOSED" ]]
@@ -162,6 +183,7 @@ wait_for_pid "$dsh_pid" 90 dsh
 unset dsh_pid
 [[ -f "$KS_PROBE_DISPOSED" ]]
 [[ "$(find "$runtime_tmp" -maxdepth 1 -type d -name 'kaleidosphere-dsh-*' | wc -l)" -eq 0 ]]
+export KS_PROBE_RESIDUE=ZERO
 
 dsh plugin --profile "$profile_name" remove kaleidosphere-dsh-plugin kaleidosphere-dsh-probe >"$evidence_dir/remove-final.log" 2>&1
 node -e 'const p=require(process.argv[1]); if(Object.keys(p.dependencies||{}).length||p.dsh.profile.bundles.some(x=>/kaleidosphere/.test(x))) process.exit(1)' "$profile_dir/package.json"
@@ -260,17 +282,26 @@ const dir = process.argv[2]
 const advanced = process.argv[3] === '1'
 const active = JSON.parse(fs.readFileSync(path.join(dir, 'active.json')))
 const reinstall = JSON.parse(fs.readFileSync(path.join(dir, 'active-reinstall.json')))
+const unloaded = JSON.parse(fs.readFileSync(path.join(dir, 'unloaded.json')))
+const reloaded = JSON.parse(fs.readFileSync(path.join(dir, 'reloaded.json')))
+const expectedTools = ['kaleidosphere_analyze', 'kaleidosphere_discovery', 'kaleidosphere_plan', 'kaleidosphere_preview', 'kaleidosphere_readback', 'kaleidosphere_status']
+if (unloaded.state !== 'UNLOADED' || unloaded.tools.length !== 0) throw new Error('invalid unloaded lifecycle evidence')
+if (reloaded.state !== 'RELOADED' || JSON.stringify(reloaded.tools) !== JSON.stringify(expectedTools)) throw new Error('invalid reloaded lifecycle evidence')
+const reloadedStatus = reloaded.status?.response?.result?.status ?? reloaded.status?.result?.status ?? reloaded.status?.status
+if (typeof reloadedStatus !== 'string' || reloadedStatus.length === 0) throw new Error('missing reloaded status')
+if (process.env.KS_PROBE_RESIDUE !== 'ZERO') throw new Error('residue was not proven zero')
 const summary = {
   schemaVersion: 'kaleidosphere.dsh/exact-rc8-smoke/v1',
   dshVersion: '0.1.0-rc.8',
   install: 'PASS', dumpConfig: 'PASS', activeTools: active.tools,
-  toolExecutions: active.results.length, hmrUnload: 'PASS', hmrReload: 'PASS',
+  toolExecutions: active.results.length, hmrUnload: unloaded.state === 'UNLOADED' && unloaded.tools.length === 0 ? 'PASS' : 'FAIL', hmrReload: reloaded.state === 'RELOADED' && JSON.stringify(reloaded.tools) === JSON.stringify(expectedTools) && typeof reloadedStatus === 'string' ? 'PASS' : 'FAIL',
   removal: 'PASS', reinstall: reinstall.results.length === 6 ? 'PASS' : 'FAIL', invalidConfig: 'PASS',
   intentExposure: advanced ? '5_OF_6_REAL_HOST_PASS' : 'NOT_EXPECTED_FOR_ARTIFACT',
   externalBinding: advanced ? 'ATTESTED_LOOPBACK_V2_PASS' : 'NOT_EXPECTED_FOR_ARTIFACT',
   externalNonClaim: advanced ? 'P3C-EXTERNAL-LOCAL-ONLY' : 'NOT_EXPECTED_FOR_ARTIFACT',
-  residue: 'ZERO',
+  residue: process.env.KS_PROBE_RESIDUE === 'ZERO' ? 'ZERO' : 'FAIL',
 }
+if (!(summary.hmrUnload === 'PASS' && summary.hmrReload === 'PASS' && summary.residue === 'ZERO')) throw new Error('lifecycle summary cannot claim PASS')
 fs.writeFileSync(path.join(dir, 'summary.json'), `${JSON.stringify(summary, null, 2)}\n`)
 console.log(JSON.stringify(summary))
 NODE

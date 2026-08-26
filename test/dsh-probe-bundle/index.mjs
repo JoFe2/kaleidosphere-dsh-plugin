@@ -10,8 +10,18 @@ function writeJson(filename, value) {
   writeFileSync(filename, `${JSON.stringify(value, null, 2)}\n`)
 }
 
-function available(ctx) {
-  return ctx.tools.schemas().map(item => item.name).filter(name => names.includes(name)).sort()
+function available(ctx, { allowEmpty = false } = {}) {
+  const allSchemaNames = ctx.tools.schemas().map(item => item.name).sort()
+  const schemaNames = allSchemaNames.filter(name => name.startsWith('kaleidosphere_'))
+  const expected = [...expectedNames].sort()
+  if (!(allowEmpty && schemaNames.length === 0) && (schemaNames.length !== expected.length || schemaNames.some((name, index) => name !== expected[index]))) {
+    throw new Error(`host tool surface mismatch: expected ${expected.join(',')} got ${schemaNames.join(',')}`)
+  }
+  return schemaNames
+}
+
+function allSchemaNames(ctx) {
+  return ctx.tools.schemas().map(item => item.name).sort()
 }
 
 function parameterizedSchemas(ctx) {
@@ -66,25 +76,38 @@ export const inject = ['tools']
 export function apply(ctx) {
   let stopped = false
   let phase = 'boot'
+  const generation = (globalThis.__kaleidosphereProbeGeneration ?? 0) + 1
+  globalThis.__kaleidosphereProbeGeneration = generation
+  const executionBinding = {
+    boundary: 'IN_PLUGIN_PROCESS_LOCAL_RUNTIME_NOT_HOST_TOOL',
+    processId: process.pid,
+    generation,
+  }
   const interval = setInterval(async () => {
     if (stopped) return
     stopped = true
     try {
       if (phase === 'boot') {
         const tools = available(ctx)
-        if (tools.length !== expectedNames.length || expectedNames.some(name => !tools.includes(name))) return
+        const hostSchemaNames = [...tools]
+        const completeHostSchemaNames = allSchemaNames(ctx)
         const results = process.env.KS_PROBE_MODE === 'inventory'
           ? []
           : process.env.KS_PROBE_MODE === 'status'
             ? await executeStatus(ctx)
             : await executeAll(ctx)
         if (process.env.KS_PROBE_MODE !== 'inventory' && process.env.KS_PROBE_MODE !== 'status') {
-          writeJson(process.env.KS_PROBE_LOCAL_SURFACE, await runLocalSurfaceProbe())
-          writeJson(process.env.KS_PROBE_NEGATIVE_MATRIX, await runNegativeMatrix())
+          const localSurface = await runLocalSurfaceProbe({ hostSchemaNames, executionBinding })
+          const negativeMatrix = await runNegativeMatrix({ hostSchemaNames, executionBinding })
+          writeJson(process.env.KS_PROBE_LOCAL_SURFACE, { ...localSurface, executionBinding, hostSchemaNames, completeHostSchemaNames })
+          writeJson(process.env.KS_PROBE_NEGATIVE_MATRIX, { ...negativeMatrix, executionBinding, hostSchemaNames, completeHostSchemaNames })
         }
         writeJson(process.env.KS_PROBE_ACTIVE, {
           state: 'ACTIVE',
           tools,
+          hostSchemaNames,
+          completeHostSchemaNames,
+          executionBinding,
           schemas: parameterizedSchemas(ctx),
           results,
           invalid: await executeInvalid(ctx),
@@ -99,14 +122,18 @@ export function apply(ctx) {
         }
         phase = 'await-unload'
       } else if (phase === 'await-unload') {
-        if (!existsSync(process.env.KS_PROBE_UNLOAD_REQUEST) || available(ctx).length !== 0) return
-        writeJson(process.env.KS_PROBE_UNLOADED, { state: 'UNLOADED', tools: available(ctx) })
+        if (!existsSync(process.env.KS_PROBE_UNLOAD_REQUEST)) return
+        const unloadedTools = available(ctx, { allowEmpty: true })
+        if (unloadedTools.length !== 0) return
+        writeJson(process.env.KS_PROBE_UNLOADED, { state: 'UNLOADED', tools: unloadedTools, hostSchemaNames: unloadedTools, executionBinding })
         phase = 'await-reload'
       } else if (phase === 'await-reload') {
-        if (!existsSync(process.env.KS_PROBE_RELOAD_REQUEST) || available(ctx).length !== names.length) return
+        if (!existsSync(process.env.KS_PROBE_RELOAD_REQUEST)) return
+        const hostSchemaNames = available(ctx)
+        if (hostSchemaNames.length !== names.length) return
         const status = await ctx.tools.execute({ signal, callId: 'ks-probe-reloaded', name: 'kaleidosphere_status', arguments: {} })
         if (status.isError) throw new Error('reloaded status failed')
-        writeJson(process.env.KS_PROBE_RELOADED, { state: 'RELOADED', tools: available(ctx), status: status.value })
+        writeJson(process.env.KS_PROBE_RELOADED, { state: 'RELOADED', tools: hostSchemaNames, hostSchemaNames, status: status.value, executionBinding })
         process.emit('SIGTERM')
       }
     } catch (error) {
