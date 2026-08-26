@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict'
-import { readFile, readdir } from 'node:fs/promises'
+import { execFileSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:http'
 import os from 'node:os'
+import path from 'node:path'
 import test from 'node:test'
 
 import { CLOSED_INTENTS, createToolDefinitions, KaleidoSphereRuntime, TOOL_NAMES } from '../lib/runtime.mjs'
@@ -2734,4 +2737,197 @@ test('P2B5B: with the three additive v0.24 local mappings present, the six pinne
     await external.dispose()
     await new Promise(resolve => server.close(resolve))
   }
+})
+
+// P2B5C1: compact vendor-pin oracle. The real fail-closed verifier
+// (scripts/verify-vendor.mjs) must prove the exact provenance of the 73-file
+// v0.16.0 and 16-file v0.24.0 vendor trees against VENDORED_MANIFEST.json, and
+// read-only git plumbing over the reachable baseline 414b40b..HEAD must prove
+// that the net vendor change is exactly the 16-file v0.24 closure (pure
+// additions under the v0.24 root, no v0.16 path) and that vendor-touching
+// commits are disjoint from lib mapping commits. Test-only: no lib or vendor
+// file is written; the scratch archive is created under os.tmpdir and removed.
+test('P2B5C1: vendor trees retain exact pinned provenance and stay outside the additive mapping commits', async () => {
+  const packageRoot = path.resolve(import.meta.dirname, '..')
+  const manifest = JSON.parse(await readFile(path.join(packageRoot, 'VENDORED_MANIFEST.json'), 'utf8'))
+
+  // Exact pins re-derived at implementation time from VENDORED_MANIFEST.json and
+  // the on-disk source (the discarded partial draft's 15-file literal is not
+  // evidence). The baseline is the reachable origin/main commit the P2A/P2B
+  // range starts from.
+  const BASELINE_COMMIT = '414b40b4c63a880ddd80c2a8c872ba3bd8002eaa'
+  const V016_TAG = 'v0.16.0'
+  const V016_COMMIT = '5a73ff8146afa0067d226cffa639efde959e8fde'
+  const V016_FILE_COUNT = 73
+  const V016_DIGEST = 'f62109b120c0bc677d47ce4ce8e23278a30bacd7bc3555c1f4877d09cefd58a2'
+  const V0240_TAG = 'v0.24.0'
+  const V0240_COMMIT = 'e092bb0bce039936b88329793b24e9f987ae0ddb'
+  const V0240_FILE_COUNT = 16
+  const V0240_DIGEST = '2eb277886ab2abcb5cd0513da16bd72fa88f4d85a220e83d6665785830da0444'
+
+  const sha256Hex = (buffer) => createHash('sha256').update(buffer).digest('hex')
+
+  async function walk(directory) {
+    const result = []
+    for (const entry of await readdir(directory, { withFileTypes: true })) {
+      const item = path.join(directory, entry.name)
+      if (entry.isDirectory()) result.push(...await walk(item))
+      else if (entry.isFile()) result.push(item)
+    }
+    return result
+  }
+
+  // Same aggregate algorithm as scripts/verify-vendor.mjs:
+  // sha256(relative-path NUL content NUL, lexicographic relative paths).
+  async function aggregateTree(rootDir) {
+    const digest = createHash('sha256')
+    const paths = (await walk(rootDir)).sort()
+    for (const item of paths) {
+      digest.update(`${path.relative(rootDir, item)}\0`)
+      digest.update(await readFile(item))
+      digest.update('\0')
+    }
+    return { count: paths.length, digest: digest.digest('hex') }
+  }
+
+  // Read-only git plumbing only (rev-parse / log / diff): fail closed (status
+  // nonzero) if the git binary is unavailable, so the test never skips.
+  function git(...args) {
+    try {
+      return { status: 0, output: execFileSync('git', args, { encoding: 'utf8', cwd: packageRoot }) }
+    } catch (error) {
+      return { status: typeof error.status === 'number' ? error.status : 1, output: `${error.stdout ?? ''}${error.stderr ?? ''}${error.code ?? ''}` }
+    }
+  }
+
+  // Run the real fail-closed verifier against a package root (the script
+  // resolves its root from its own location) and report { status, output }.
+  function runRealVerifier(root) {
+    try {
+      return { status: 0, output: execFileSync(process.execPath, [path.join(root, 'scripts', 'verify-vendor.mjs')], { encoding: 'utf8' }) }
+    } catch (error) {
+      return { status: typeof error.status === 'number' ? error.status : 1, output: `${error.stdout ?? ''}${error.stderr ?? ''}` }
+    }
+  }
+
+  // -- PINS: the manifest records the exact provenance and the on-disk trees
+  // -- match it byte-for-byte (independent recomputation, both roots).
+  assert.equal(manifest.tag, V016_TAG, 'v0.16.0 section must pin the exact tag')
+  assert.equal(manifest.commit, V016_COMMIT, 'v0.16.0 section must pin the exact source commit')
+  assert.equal(manifest.fileCount, V016_FILE_COUNT, 'v0.16.0 section must record exactly 73 files')
+  assert.equal(manifest.digest, V016_DIGEST, 'v0.16.0 section must pin the exact aggregate digest')
+  const v016Tree = await aggregateTree(path.join(packageRoot, manifest.root))
+  assert.equal(v016Tree.count, V016_FILE_COUNT, 'v0.16.0 tree must contain exactly the 73 pinned files')
+  assert.equal(v016Tree.digest, V016_DIGEST, 'v0.16.0 tree must be byte-identical to the pinned digest')
+
+  const closure = manifest.v0240
+  assert.ok(closure, 'VENDORED_MANIFEST.json must carry a v0240 handler-closure section')
+  assert.equal(closure.tag, V0240_TAG, 'v0240 section must pin the exact tag')
+  assert.equal(closure.commit, V0240_COMMIT, 'v0240 section must pin the exact source commit')
+  assert.equal(closure.fileCount, V0240_FILE_COUNT, 'v0240 section must record exactly 16 files')
+  assert.equal(closure.digest, V0240_DIGEST, 'v0240 section must pin the exact aggregate digest')
+  assert.ok(Array.isArray(closure.files) && closure.files.length === V0240_FILE_COUNT,
+    'v0240 section must carry exactly 16 per-file entries')
+  const seenVendorPaths = new Set()
+  for (const entry of closure.files) {
+    assert.equal(entry.sourceCommit, V0240_COMMIT, `source commit must be e092bb0 for ${entry.sourcePath}`)
+    assert.equal(entry.vendorPath, `${closure.root}/${entry.sourcePath}`,
+      `vendor path must mirror the source path under ${closure.root}`)
+    assert.equal(seenVendorPaths.has(entry.vendorPath), false, `duplicate vendor path ${entry.vendorPath}`)
+    seenVendorPaths.add(entry.vendorPath)
+    const buffer = await readFile(path.join(packageRoot, entry.vendorPath))
+    assert.equal(sha256Hex(buffer), entry.sha256, `vendor file ${entry.vendorPath} must match its pinned digest`)
+  }
+  const v0240OnDisk = new Set((await walk(path.join(packageRoot, closure.root))).map((item) => path.relative(packageRoot, item)))
+  assert.equal(v0240OnDisk.size, V0240_FILE_COUNT, 'v0.24.0 tree must contain exactly the 16 pinned files')
+  for (const item of v0240OnDisk) {
+    assert.ok(seenVendorPaths.has(item), `unmanifested vendor file ${item} in the v0.24.0 tree`)
+  }
+  const v0240Tree = await aggregateTree(path.join(packageRoot, closure.root))
+  assert.equal(v0240Tree.count, V0240_FILE_COUNT, 'v0.24.0 tree count must equal the pinned 16')
+  assert.equal(v0240Tree.digest, V0240_DIGEST, 'v0.24.0 tree must be byte-identical to the pinned digest')
+
+  // -- PINS: the real fail-closed verifier agrees: exit 0, and its two JSON
+  // -- lines equal the exact manifest provenance for both roots (73/16).
+  const clean = runRealVerifier(packageRoot)
+  assert.equal(clean.status, 0, `real tree must pass the real verifier (got exit ${clean.status}: ${clean.output})`)
+  const verifierLines = clean.output.trim().split('\n').map((line) => JSON.parse(line))
+  assert.equal(verifierLines.length, 2, 'the real verifier must emit exactly two provenance lines')
+  assert.deepEqual(verifierLines[0],
+    { tag: manifest.tag, commit: manifest.commit, fileCount: manifest.fileCount, digest: manifest.digest },
+    'verifier v0.16.0 output must equal the exact manifest provenance')
+  assert.deepEqual(verifierLines[1],
+    { tag: closure.tag, commit: closure.commit, fileCount: closure.fileCount, digest: closure.digest },
+    'verifier v0.24.0 output must equal the exact manifest provenance')
+  assert.deepEqual(verifierLines[0],
+    { tag: V016_TAG, commit: V016_COMMIT, fileCount: V016_FILE_COUNT, digest: V016_DIGEST },
+    'verifier v0.16.0 output must equal the exact 73-file pin')
+  assert.deepEqual(verifierLines[1],
+    { tag: V0240_TAG, commit: V0240_COMMIT, fileCount: V0240_FILE_COUNT, digest: V0240_DIGEST },
+    'verifier v0.24.0 output must equal the exact 16-file pin')
+
+  // -- ABSENT-CLOSURE RED CONTROL: with the v0.24 closure absent from a scratch
+  // -- archive (v0.16 tree, manifest and the real verifier intact), the real
+  // -- verifier must fail closed: nonzero exit, the v0.16 line emitted and the
+  // -- v0.24 line not.
+  const scratch = await mkdtemp(path.join(os.tmpdir(), 'ks-p2b5c1-'))
+  try {
+    for (const item of (await walk(path.join(packageRoot, manifest.root))).map((p) => path.relative(packageRoot, p))) {
+      const target = path.join(scratch, item)
+      await mkdir(path.dirname(target), { recursive: true })
+      await writeFile(target, await readFile(path.join(packageRoot, item)))
+    }
+    await mkdir(path.join(scratch, 'scripts'), { recursive: true })
+    await writeFile(path.join(scratch, 'scripts', 'verify-vendor.mjs'),
+      await readFile(path.join(packageRoot, 'scripts', 'verify-vendor.mjs')))
+    await writeFile(path.join(scratch, 'VENDORED_MANIFEST.json'), JSON.stringify(manifest, null, 2) + '\n')
+    // Deliberately no vendor/kaleidosphere-v0.24.0 file: the v0.24 closure is absent.
+    const absent = runRealVerifier(scratch)
+    assert.notEqual(absent.status, 0, 'an absent v0.24 closure must make the real verifier exit nonzero')
+    assert.ok(absent.output.includes(JSON.stringify({ tag: V016_TAG, commit: V016_COMMIT, fileCount: V016_FILE_COUNT, digest: V016_DIGEST })),
+      'the v0.16.0 section must have passed and emitted its exact provenance line')
+    assert.ok(!absent.output.includes(JSON.stringify({ tag: V0240_TAG, commit: V0240_COMMIT, fileCount: V0240_FILE_COUNT, digest: V0240_DIGEST })),
+      'the v0.24.0 section must have failed and not emitted its provenance line')
+  } finally {
+    await rm(scratch, { recursive: true, force: true })
+  }
+
+  // -- DISJOINT + RANGE: read-only git range over the reachable baseline; fail
+  // -- closed (never skip) if the baseline ref or the git binary is unavailable.
+  const rev = git('rev-parse', '--verify', `${BASELINE_COMMIT}^{commit}`)
+  assert.equal(rev.status, 0,
+    `baseline ${BASELINE_COMMIT} must be a reachable commit (git unavailable or ref missing — failing closed)`)
+  assert.equal(rev.output.trim(), BASELINE_COMMIT)
+  const head = git('rev-parse', 'HEAD')
+  assert.equal(head.status, 0, 'HEAD must resolve to a commit (not a git checkout — failing closed)')
+
+  const vendorLog = git('log', '--format=%H', `${BASELINE_COMMIT}..HEAD`, '--', 'vendor/')
+  assert.equal(vendorLog.status, 0, 'vendor commit range must resolve')
+  const libLog = git('log', '--format=%H', `${BASELINE_COMMIT}..HEAD`, '--', 'lib/')
+  assert.equal(libLog.status, 0, 'lib commit range must resolve')
+  const vendorCommits = new Set(vendorLog.output.trim().split('\n').filter(Boolean))
+  const libCommits = new Set(libLog.output.trim().split('\n').filter(Boolean))
+  assert.ok(vendorCommits.size > 0, 'the range must contain vendor commits (non-vacuous proof)')
+  assert.ok(libCommits.size > 0, 'the range must contain lib mapping commits (non-vacuous proof)')
+  for (const commit of vendorCommits) {
+    assert.ok(!libCommits.has(commit),
+      `vendor-touching commit ${commit} must be disjoint from the lib mapping commits`)
+  }
+
+  const vendorRange = git('diff', '--name-status', `${BASELINE_COMMIT}..HEAD`, '--', 'vendor/')
+  assert.equal(vendorRange.status, 0, 'vendor range diff must resolve')
+  const rangeEntries = vendorRange.output.trim().split('\n').filter(Boolean).map((line) => line.split('\t'))
+  assert.equal(rangeEntries.length, V0240_FILE_COUNT,
+    'the net vendor range must touch exactly the 16 closure files')
+  const manifestClosure = new Set(closure.files.map((entry) => entry.vendorPath))
+  const rangePaths = new Set()
+  for (const [status, vendorPath] of rangeEntries) {
+    assert.equal(status, 'A', `vendor range entry ${vendorPath} must be a pure addition, not ${status}`)
+    assert.ok(vendorPath.startsWith(`${closure.root}/`),
+      `vendor range entry ${vendorPath} must live under the v0.24 root ${closure.root}`)
+    assert.ok(!vendorPath.startsWith(`${manifest.root}/`), 'no v0.16 vendor path may change in the range')
+    rangePaths.add(vendorPath)
+  }
+  assert.deepEqual([...rangePaths].sort(), [...manifestClosure].sort(),
+    'the net vendor range must equal the manifest v0.24 closure exactly')
 })
