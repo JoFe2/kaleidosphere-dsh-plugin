@@ -3,16 +3,23 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 run_root="$(mktemp -d)"
+if [[ -n "${EVIDENCE_DIR:-}" ]]; then
+  # A prefilled caller directory is stale evidence preexists and is rejected.
+  echo 'EVIDENCE_DIR must be empty; caller-supplied evidence is rejected to prevent stale evidence reuse' >&2
+  exit 2
+fi
+run_id="$(basename "$run_root")"
 tools_root="${DSH_TOOLS_ROOT:-$repo_root}"
 bin_root="$run_root/bin"
 dsh_home="$run_root/home"
 runtime_tmp="$run_root/runtime-tmp"
-evidence_dir="${EVIDENCE_DIR:-$run_root/evidence}"
+evidence_dir="$run_root/evidence/$run_id"
 advanced_features="${DSH_EXPECT_ADVANCED_FEATURES:-1}"
 file_timeout_steps="${DSH_FILE_TIMEOUT_STEPS:-1200}"
 profile_name=ks-e2e
 profile_dir="$dsh_home/profiles/$profile_name"
 mkdir -p "$bin_root" "$dsh_home" "$runtime_tmp" "$evidence_dir"
+export KS_PROBE_RUN_ID="$run_id"
 [[ "$advanced_features" = 0 || "$advanced_features" = 1 ]]
 
 cleanup() {
@@ -72,6 +79,8 @@ dsh_pid=$!
 
 wait_for_file() {
   local file=$1
+  # evidence_dir is a fresh run-id directory; only files created below it can
+  # be observed, and JSON evidence is independently bound by assert_run_bound_json.
   for _ in $(seq 1 "$file_timeout_steps"); do
     [[ -f "$KS_PROBE_FAILURE" ]] && { cat "$KS_PROBE_FAILURE" >&2; return 1; }
     [[ -f "$file" ]] && return 0
@@ -82,9 +91,16 @@ wait_for_file() {
   return 1
 }
 
+assert_run_bound_json() {
+  node -e 'const fs=require("fs");const x=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));if(x.runId!==process.argv[2])throw new Error(`run binding mismatch for ${process.argv[1]}`)' "$1" "$run_id"
+}
+
 wait_for_file "$KS_PROBE_ACTIVE"
 wait_for_file "$KS_PROBE_LOCAL_SURFACE"
 wait_for_file "$KS_PROBE_NEGATIVE_MATRIX"
+assert_run_bound_json "$KS_PROBE_ACTIVE"
+assert_run_bound_json "$KS_PROBE_LOCAL_SURFACE"
+assert_run_bound_json "$KS_PROBE_NEGATIVE_MATRIX"
 node - <<'NODE' "$KS_PROBE_ACTIVE" "$expected_fixture_digests"
 const active = require(process.argv[2])
 const expected = require(process.argv[3])
@@ -154,6 +170,7 @@ cmp "$evidence_dir/fixture-digests-before.json" "$evidence_dir/fixture-digests-a
 printf '%s\n' '- id: kaleidosphere-dsh-plugin' '  disabled: true' >"$profile_dir/cordis.patch.yml"
 : >"$KS_PROBE_UNLOAD_REQUEST"
 wait_for_file "$KS_PROBE_UNLOADED"
+assert_run_bound_json "$KS_PROBE_UNLOADED"
 node - <<'NODE' "$KS_PROBE_UNLOADED"
 const x = require(process.argv[2])
 if (x.state !== 'UNLOADED' || !Array.isArray(x.tools) || x.tools.length !== 0 || JSON.stringify(x.hostSchemaNames) !== '[]') process.exit(1)
@@ -164,6 +181,7 @@ NODE
 printf '[]\n' >"$profile_dir/cordis.patch.yml"
 : >"$KS_PROBE_RELOAD_REQUEST"
 wait_for_file "$KS_PROBE_RELOADED"
+assert_run_bound_json "$KS_PROBE_RELOADED"
 node - <<'NODE' "$KS_PROBE_RELOADED"
 const x = require(process.argv[2])
 const expected = ['kaleidosphere_analyze', 'kaleidosphere_discovery', 'kaleidosphere_plan', 'kaleidosphere_preview', 'kaleidosphere_readback', 'kaleidosphere_status']
@@ -192,6 +210,7 @@ export KS_PROBE_MODE=oneshot
 dsh --profile "$profile_name" >"$evidence_dir/dsh-reinstall.log" 2>&1 &
 dsh_pid=$!
 wait_for_file "$KS_PROBE_ACTIVE"
+assert_run_bound_json "$KS_PROBE_ACTIVE"
 wait_for_pid "$dsh_pid" 90 dsh
 unset dsh_pid
 [[ -f "$KS_PROBE_DISPOSED" ]]
@@ -233,6 +252,7 @@ export KS_PROBE_EXPECTED_TOOL_NAMES='kaleidosphere_status,kaleidosphere_discover
 dsh --profile "$toggled_profile" >"$evidence_dir/dsh-toggled.log" 2>&1 &
 dsh_pid=$!
 wait_for_file "$KS_PROBE_ACTIVE"
+assert_run_bound_json "$KS_PROBE_ACTIVE"
 wait_for_pid "$dsh_pid" 90 dsh
 unset dsh_pid KS_PROBE_EXPECTED_TOOL_NAMES
 node -e 'const x=require(process.argv[1]); if(x.tools.length!==5||x.tools.includes("kaleidosphere_preview")||x.results.length!==0) process.exit(1)' "$KS_PROBE_ACTIVE"
@@ -274,6 +294,7 @@ export KS_PROBE_EXPECTED_TOOL_NAMES='kaleidosphere_status'
 dsh --profile "$external_profile" >"$evidence_dir/dsh-external.log" 2>&1 &
 dsh_pid=$!
 wait_for_file "$KS_PROBE_ACTIVE"
+assert_run_bound_json "$KS_PROBE_ACTIVE"
 wait_for_pid "$dsh_pid" 90 dsh
 unset dsh_pid KS_PROBE_EXPECTED_TOOL_NAMES
 node -e 'const x=require(process.argv[1]); if(x.tools.length!==1||x.results.length!==1||x.results[0].value?.response?.result?.status!=="EXTERNAL_STUB_READY") process.exit(1)' "$KS_PROBE_ACTIVE"
@@ -293,10 +314,15 @@ const fs = require('fs')
 const path = require('path')
 const dir = process.argv[2]
 const advanced = process.argv[3] === '1'
+const runId = process.env.KS_PROBE_RUN_ID
+if (typeof runId !== 'string' || runId.length === 0) throw new Error('missing fresh run id')
 const active = JSON.parse(fs.readFileSync(path.join(dir, 'active.json')))
 const reinstall = JSON.parse(fs.readFileSync(path.join(dir, 'active-reinstall.json')))
 const unloaded = JSON.parse(fs.readFileSync(path.join(dir, 'unloaded.json')))
 const reloaded = JSON.parse(fs.readFileSync(path.join(dir, 'reloaded.json')))
+for (const [name, evidence] of Object.entries({ active, reinstall, unloaded, reloaded })) {
+  if (evidence.runId !== runId) throw new Error(`stale or foreign ${name} evidence`)
+}
 const expectedTools = ['kaleidosphere_analyze', 'kaleidosphere_discovery', 'kaleidosphere_plan', 'kaleidosphere_preview', 'kaleidosphere_readback', 'kaleidosphere_status']
 if (unloaded.state !== 'UNLOADED' || unloaded.tools.length !== 0) throw new Error('invalid unloaded lifecycle evidence')
 if (reloaded.state !== 'RELOADED' || JSON.stringify(reloaded.tools) !== JSON.stringify(expectedTools)) throw new Error('invalid reloaded lifecycle evidence')
@@ -304,6 +330,7 @@ const reloadedStatus = reloaded.status?.response?.result?.status ?? reloaded.sta
 if (typeof reloadedStatus !== 'string' || reloadedStatus.length === 0) throw new Error('missing reloaded status')
 if (process.env.KS_PROBE_RESIDUE !== 'ZERO') throw new Error('residue was not proven zero')
 const summary = {
+  runId,
   schemaVersion: 'kaleidosphere.dsh/exact-rc8-smoke/v1',
   dshVersion: '0.1.0-rc.8',
   install: 'PASS', dumpConfig: 'PASS', activeTools: active.tools,
