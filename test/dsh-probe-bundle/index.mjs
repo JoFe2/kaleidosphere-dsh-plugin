@@ -1,4 +1,6 @@
 import { existsSync, writeFileSync } from 'node:fs'
+import { runLocalSurfaceProbe } from './local-surface.mjs'
+import { runNegativeMatrix } from './negative-matrix.mjs'
 
 const names = ['status', 'discovery', 'analyze', 'plan', 'preview', 'readback'].map(action => `kaleidosphere_${action}`)
 const expectedNames = process.env.KS_PROBE_EXPECTED_TOOL_NAMES?.split(',').filter(Boolean) ?? names
@@ -57,6 +59,10 @@ async function executeStatus(ctx) {
 export const name = 'kaleidosphere-dsh-probe'
 export const inject = ['tools']
 
+// P3C bridges the verified P3A/P3B evidence into the real rc.8 host
+// lifecycle. exactly six native host tools are exposed; mapped capabilities
+// remain below this host surface and are never exposed as host tool names.
+
 export function apply(ctx) {
   let stopped = false
   let phase = 'boot'
@@ -72,6 +78,10 @@ export function apply(ctx) {
           : process.env.KS_PROBE_MODE === 'status'
             ? await executeStatus(ctx)
             : await executeAll(ctx)
+        if (process.env.KS_PROBE_MODE !== 'inventory' && process.env.KS_PROBE_MODE !== 'status') {
+          writeJson(process.env.KS_PROBE_LOCAL_SURFACE, await runLocalSurfaceProbe())
+          writeJson(process.env.KS_PROBE_NEGATIVE_MATRIX, await runNegativeMatrix())
+        }
         writeJson(process.env.KS_PROBE_ACTIVE, {
           state: 'ACTIVE',
           tools,

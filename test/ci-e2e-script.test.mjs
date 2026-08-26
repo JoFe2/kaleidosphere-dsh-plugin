@@ -17,6 +17,25 @@ test('rc.8 E2E scripts use the pinned root dependency and bounded process waits'
     assert.match(source, /DSH_FILE_TIMEOUT_STEPS:-1200/, `${path}: bounded CI readiness window missing`)
   }
 
+  const lifecycle = await readFile(new URL('../scripts/test-dsh-rc8.sh', import.meta.url), 'utf8')
+  for (const marker of [
+    'KS_PROBE_LOCAL_SURFACE',
+    'KS_PROBE_NEGATIVE_MATRIX',
+    'negative-matrix.json',
+    'summary.json',
+    'fixture-digests-before.json',
+    'fixture-digests-after.json',
+    'bounded external stub',
+    'P3C-EXTERNAL-LOCAL-ONLY',
+  ]) {
+    assert.match(lifecycle, new RegExp(marker.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&')), `lifecycle evidence marker missing: ${marker}`)
+  }
+
+  const probe = await readFile(new URL('../test/dsh-probe-bundle/index.mjs', import.meta.url), 'utf8')
+  assert.match(probe, /runLocalSurfaceProbe/, 'host probe does not integrate P3A')
+  assert.match(probe, /runNegativeMatrix/, 'host probe does not integrate P3B')
+  assert.match(probe, /exactly six native host tools/, 'host probe tool-surface invariant missing')
+
   const workflow = await readFile(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8')
   assert.match(workflow, /timeout-minutes: 15/, 'CI job timeout missing')
   assert.match(workflow, /timeout 300 npm run test:dsh\b/, 'test:dsh step timeout missing')
