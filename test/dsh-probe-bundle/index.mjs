@@ -64,6 +64,17 @@ function available(catalog, { allowEmpty = false } = {}) {
   return schemaNames
 }
 
+function expectedSurfaceReady(catalog) {
+  const observed = catalog.completeHostSchemaNames.filter(name => name.startsWith('kaleidosphere_'))
+  const expected = new Set(expectedNames)
+  // DSH may apply sibling bundles in either order on slower fresh CI hosts.
+  // Retry only while the observed surface is an incomplete subset of the
+  // closed expected surface. Unexpected/extra names flow immediately into
+  // available() below and fail closed; the outer run-bound file timeout keeps
+  // an incomplete surface bounded.
+  return observed.length >= expected.size || observed.some(name => !expected.has(name))
+}
+
 function parameterizedSchemas(catalog) {
   return catalog.records.filter(item => [
     'kaleidosphere_discovery',
@@ -129,6 +140,7 @@ export function apply(ctx) {
     try {
       if (phase === 'boot') {
         const catalog = schemaCatalog(ctx)
+        if (!expectedSurfaceReady(catalog)) return
         const tools = available(catalog)
         const hostSchemaNames = [...tools]
         const { completeHostSchemaNames, completeHostSchemaDigest, records: completeHostSchemaRecords } = catalog
