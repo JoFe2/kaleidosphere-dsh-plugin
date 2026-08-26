@@ -3110,3 +3110,374 @@ test('P2B5C2: the additive production footprint is confined to the two approved 
     assert.ok(pendingDiff.output.includes('P2B5C2'), 'the pending change must carry the P2B5C2 marker (this leaf\'s change)')
   }
 })
+
+// P2B5C3: compact in-memory git-object rollback-simulation oracle. Read-only
+// git plumbing (rev-parse / show / diff / log / status) over the reachable
+// baseline 414b40b..HEAD must prove that restoring the exact baseline bytes
+// of the two lib mapping files — recovered as git objects and hash-verified
+// against their exact baseline blob ids — removes exactly the 301-line purely
+// additive delta (172/0 + 129/0, zero removals), that the removed mapping
+// references only the three manifest-pinned v0.24 handlers and no v0.16
+// vendor path, that the simulated post-revert lib contents are a v0.16-only
+// runtime with no v0.24 tree or handler identifier, and that both vendor
+// pins remain green at the P2B5C1 anchors. The revert set is exactly the two
+// approved lib mapping files and stays disjoint from vendor. The same
+// predicate must fail closed with the exact 8-violation closure-absent
+// signature when the v0.24 vendor closure is absent from the range (the
+// baseline state). The C1/C2 proofs (real verifier, commit disjointness,
+// footprint confinement) are not re-proven; their anchors (baseline commit,
+// manifest closure file list, pinned vendor digests, fail-closed git helper
+// shape) are reused. No actual rollback is performed: no reset, revert,
+// checkout, write, push or network access — the simulation is pure in-memory
+// state over read-only git objects, the worktree production files stay
+// anchored to HEAD, and the pre/post-simulation working tree status is
+// byte-identical. Test-only: the only leaf change is this test in
+// test/runtime.test.mjs.
+test('P2B5C3: the simulated baseline rollback of the two lib mapping files removes exactly the additive v0.24 mapping and leaves both vendor trees and the v0.16 runtime untouched', async () => {
+  const packageRoot = path.resolve(import.meta.dirname, '..')
+  const manifest = JSON.parse(await readFile(path.join(packageRoot, 'VENDORED_MANIFEST.json'), 'utf8'))
+  const closure = manifest.v0240
+  assert.ok(closure && Array.isArray(closure.files),
+    'VENDORED_MANIFEST.json must carry the v0240 closure section with per-file entries (anchor reused from P2B5C1)')
+  assert.equal(closure.fileCount, 16, 'the v0240 section must record exactly 16 files')
+
+  // Reachable baseline anchor (same as P2B5C1/P2B5C2) and the P2B5C1 vendor-pin
+  // anchors (reused, not re-proven): the exact pinned provenance of both
+  // trees.
+  const BASELINE_COMMIT = '414b40b4c63a880ddd80c2a8c872ba3bd8002eaa'
+  const V016_FILE_COUNT = 73
+  const V016_DIGEST = 'f62109b120c0bc677d47ce4ce8e23278a30bacd7bc3555c1f4877d09cefd58a2'
+  const V0240_FILE_COUNT = 16
+  const V0240_DIGEST = '2eb277886ab2abcb5cd0513da16bd72fa88f4d85a220e83d6665785830da0444'
+
+  // Exact blob-object anchors of the two mapping paths at the baseline and at
+  // HEAD (git object ids recovered from the reachable history at
+  // implementation time).
+  const BASE_BLOB = new Map([
+    ['lib/capability-manifest.mjs', 'f673e98acc9f64a37139f9bc1ecaa9da1ff48d68'],
+    ['lib/runtime.mjs', 'f4b44082c391aad87405a67c6d00bfa105fefaa5'],
+  ])
+  const HEAD_BLOB = new Map([
+    ['lib/capability-manifest.mjs', '3826e360893d2d938999a85555bf573a2b007254'],
+    ['lib/runtime.mjs', '0fdce702fc70ffb70cde9aaed3c83ad96e8ae473'],
+  ])
+
+  // The exact revert set and the exact purely additive per-file delta.
+  const REVERT_SET = ['lib/capability-manifest.mjs', 'lib/runtime.mjs']
+  const LIB_DELTA = new Map([
+    ['lib/capability-manifest.mjs', { added: 172, deleted: 0 }],
+    ['lib/runtime.mjs', { added: 129, deleted: 0 }],
+  ])
+  const TOTAL_ADDED = 301
+
+  // The three manifest-pinned v0.24 handlers (source-derived from the v0240
+  // section, cross-checked against the exact pinned paths).
+  const PINNED_HANDLERS = closure.files
+    .filter((entry) => entry.vendorPath.includes('/services/bi-agent/src/') && entry.vendorPath.endsWith('-handler-v1.mjs'))
+    .map((entry) => entry.vendorPath)
+  assert.equal(PINNED_HANDLERS.length, 3, 'the manifest v0240 section must pin exactly three bi-agent handlers')
+  const PINNED_HANDLER_SET = new Set(PINNED_HANDLERS)
+  assert.deepEqual([...PINNED_HANDLERS].sort(), [
+    'vendor/kaleidosphere-v0.24.0/services/bi-agent/src/database-overview-handler-v1.mjs',
+    'vendor/kaleidosphere-v0.24.0/services/bi-agent/src/object-details-handler-v1.mjs',
+    'vendor/kaleidosphere-v0.24.0/services/bi-agent/src/object-search-handler-v1.mjs',
+  ], 'the three pinned v0.24 handlers must be exactly the Search, Details and Overview handler paths')
+
+  // The v0.24 tree and handler identifiers that a v0.16-only post-revert
+  // runtime must not carry.
+  const V024_IDENTIFIERS = [
+    'kaleidosphere-v0.24.0',
+    'handleObjectSearchV1',
+    'handleObjectDetailsV1',
+    'handleDatabaseOverviewRequestV1',
+    'e092bb0bce039936b88329793b24e9f987ae0ddb',
+    'V0240',
+    'PROJECTED_READ_ONLY',
+    'read-only-evidence-projection',
+  ]
+
+  // Read-only git plumbing only; fail closed (never skip) if the git binary
+  // or a ref is unavailable, and structurally deny any non-read-only
+  // subcommand so the simulation can never issue a git write.
+  const READ_ONLY_GIT_SUBCOMMANDS = new Set(['rev-parse', 'show', 'diff', 'log', 'status'])
+  function git(...args) {
+    if (!READ_ONLY_GIT_SUBCOMMANDS.has(args[0])) throw new Error(`P2B5C3 git helper is read-only; subcommand ${args[0]} is not allowed`)
+    try {
+      return { status: 0, output: execFileSync('git', args, { encoding: 'utf8', cwd: packageRoot }) }
+    } catch (error) {
+      return { status: typeof error.status === 'number' ? error.status : 1, output: `${error.stdout ?? ''}${error.stderr ?? ''}${error.code ?? ''}` }
+    }
+  }
+
+  // Raw read-only `git show` for byte-exact git-object recovery.
+  function gitShowBuffer(objectish) {
+    return execFileSync('git', ['show', objectish], { cwd: packageRoot })
+  }
+
+  // Git blob-object id of a content buffer (sha1 of "blob <len>\0" + bytes).
+  function blobId(content) {
+    return createHash('sha1').update(Buffer.concat([Buffer.from(`blob ${content.length}\0`), content])).digest('hex')
+  }
+
+  // Same aggregate algorithm as P2B5C1 (sha256 over lexicographic relative
+  // paths, path NUL content NUL).
+  async function walk(directory) {
+    const result = []
+    for (const entry of await readdir(directory, { withFileTypes: true })) {
+      const item = path.join(directory, entry.name)
+      if (entry.isDirectory()) result.push(...await walk(item))
+      else if (entry.isFile()) result.push(item)
+    }
+    return result
+  }
+
+  async function aggregateTree(rootDir) {
+    const digest = createHash('sha256')
+    const paths = (await walk(rootDir)).sort()
+    for (const item of paths) {
+      digest.update(`${path.relative(rootDir, item)}\0`)
+      digest.update(await readFile(item))
+      digest.update('\0')
+    }
+    return { count: paths.length, digest: digest.digest('hex') }
+  }
+
+  // In-memory git-object revert simulation over the range base..head: recover
+  // the exact baseline bytes of the two approved lib paths as git objects
+  // (hash-verified against their exact blob ids), anchor the head bytes, and
+  // compute the additive delta the simulated rollback would remove. Pure
+  // in-memory state; no git, worktree or external write is performed.
+  function simulateRollbackRange(base, head) {
+    const wholeNameStatus = git('diff', '--name-status', '--no-renames', `${base}..${head}`)
+    assert.equal(wholeNameStatus.status, 0, `range ${base}..${head} whole-tree name-status must resolve`)
+    const vendorRangePaths = new Set()
+    for (const line of (wholeNameStatus.output.trim() ? wholeNameStatus.output.trim().split('\n') : [])) {
+      const fields = line.split('\t')
+      assert.equal(fields.length, 2, `whole-tree name-status line must be STATUS<TAB>PATH, got: ${line}`)
+      if (fields[1].startsWith('vendor/')) vendorRangePaths.add(fields[1])
+    }
+
+    const libNameStatus = git('diff', '--name-status', '--no-renames', `${base}..${head}`, '--', 'lib/')
+    assert.equal(libNameStatus.status, 0, `range ${base}..${head} lib name-status must resolve`)
+    const statuses = new Map()
+    for (const line of (libNameStatus.output.trim() ? libNameStatus.output.trim().split('\n') : [])) {
+      const fields = line.split('\t')
+      assert.equal(fields.length, 2, `lib name-status line must be STATUS<TAB>PATH, got: ${line}`)
+      assert.ok(!statuses.has(fields[1]), `lib name-status path ${fields[1]} must not be duplicated`)
+      statuses.set(fields[1], fields[0])
+    }
+
+    const numstat = git('diff', '--numstat', '--no-renames', `${base}..${head}`, '--', 'lib/')
+    assert.equal(numstat.status, 0, `range ${base}..${head} lib numstat must resolve`)
+    const libNumstat = new Map()
+    for (const line of (numstat.output.trim() ? numstat.output.trim().split('\n') : [])) {
+      const [added, deleted, target] = line.split('\t')
+      assert.ok(!Number.isNaN(Number(added)) && !Number.isNaN(Number(deleted)), `lib numstat line must be numeric (not binary), got: ${line}`)
+      libNumstat.set(target, { added: Number(added), deleted: Number(deleted) })
+    }
+
+    const unified = git('diff', `${base}..${head}`, '--', 'lib/')
+    assert.equal(unified.status, 0, `range ${base}..${head} lib unified diff must resolve`)
+    let addedLines = 0
+    let removedLines = 0
+    const addedLineTexts = []
+    for (const line of unified.output.split('\n')) {
+      if (line.startsWith('+++') || line.startsWith('---')) continue
+      if (line.startsWith('+')) { addedLines += 1; addedLineTexts.push(line.slice(1)) }
+      else if (line.startsWith('-')) removedLines += 1
+    }
+
+    const blobs = new Map()
+    for (const target of REVERT_SET) {
+      const baseBlob = git('rev-parse', `${base}:${target}`)
+      assert.equal(baseBlob.status, 0, `baseline blob ${base}:${target} must resolve`)
+      const headBlob = git('rev-parse', `${head}:${target}`)
+      assert.equal(headBlob.status, 0, `head blob ${head}:${target} must resolve`)
+      const baseBytes = gitShowBuffer(`${base}:${target}`)
+      const headBytes = gitShowBuffer(`${head}:${target}`)
+      blobs.set(target, {
+        baseBlobId: baseBlob.output.trim(),
+        headBlobId: headBlob.output.trim(),
+        baseOk: blobId(baseBytes) === baseBlob.output.trim(),
+        headOk: blobId(headBytes) === headBlob.output.trim(),
+        baseBytes,
+        headBytes,
+      })
+    }
+
+    return { vendorRangePaths, statuses, libNumstat, addedLines, removedLines, addedLineTexts, blobs }
+  }
+
+  // The rollback-simulation predicate: exact two-path revert set disjoint from
+  // vendor, byte-exact restoration with the exact purely additive 301/0
+  // delta, removed mapping confined to the three pinned v0.24 handlers, and a
+  // v0.16-only post-revert runtime. Returns the violation list (empty =
+  // proven).
+  function rollbackViolations(sim) {
+    const violations = []
+    // P2B5C3-SET: exact two-path revert set, disjoint from vendor.
+    for (const [target, status] of sim.statuses) {
+      if (target.startsWith('vendor/')) violations.push(`revert path ${target} must not be a vendor path`)
+      else if (!REVERT_SET.includes(target)) violations.push(`out-of-set revert path ${target}`)
+      else if (status !== 'M') violations.push(`revert path ${target} must be a modification, got ${status}`)
+    }
+    for (const target of REVERT_SET) {
+      if (!sim.statuses.has(target)) violations.push(`missing revert path ${target}`)
+    }
+    for (const target of sim.vendorRangePaths) {
+      if (REVERT_SET.includes(target)) violations.push(`vendor path ${target} must stay out of the revert set`)
+    }
+    // P2B5C3-BYTES: byte-exact restoration, exact 172/0 + 129/0 = 301/0 delta.
+    for (const [target, expected] of LIB_DELTA) {
+      const actual = sim.libNumstat.get(target)
+      if (!actual) violations.push(`missing lib numstat for ${target}`)
+      else if (actual.added !== expected.added || actual.deleted !== 0) violations.push(`lib ${target} delta ${actual.added}/${actual.deleted} is not the exact purely additive ${expected.added}/0`)
+    }
+    for (const target of sim.libNumstat.keys()) {
+      if (!LIB_DELTA.has(target)) violations.push(`unexpected lib path ${target} in the delta`)
+    }
+    if (sim.addedLines !== TOTAL_ADDED || sim.removedLines !== 0) violations.push(`whole-lib delta ${sim.addedLines}/${sim.removedLines} is not the exact 301/0 additive delta`)
+    for (const target of REVERT_SET) {
+      const blob = sim.blobs.get(target)
+      if (!blob) violations.push(`missing baseline bytes for ${target}`)
+      else if (!blob.baseOk) violations.push(`restored baseline bytes for ${target} do not hash to the exact baseline blob`)
+      else if (!blob.headOk) violations.push(`head bytes for ${target} do not hash to the exact head blob`)
+    }
+    // P2B5C3-V016: the removed mapping references exactly the three pinned
+    // v0.24 handlers and no v0.16 vendor path.
+    const removedRefs = new Set()
+    for (const line of sim.addedLineTexts) {
+      for (const match of line.matchAll(/vendor\/[A-Za-z0-9._/-]+\.mjs/g)) removedRefs.add(match[0])
+    }
+    for (const handler of PINNED_HANDLERS) {
+      if (!removedRefs.has(handler)) violations.push(`missing removed v0.24 handler reference ${handler}`)
+    }
+    for (const ref of removedRefs) {
+      if (!PINNED_HANDLER_SET.has(ref)) violations.push(`removed mapping references a vendor path outside the three pinned v0.24 handlers: ${ref}`)
+      if (ref.startsWith(`${manifest.root}/`)) violations.push(`removed mapping references a v0.16 vendor path: ${ref}`)
+    }
+    // P2B5C3-V016: the simulated post-revert lib contents are a v0.16-only
+    // runtime with no v0.24 tree or handler identifier.
+    for (const target of REVERT_SET) {
+      const blob = sim.blobs.get(target)
+      if (!blob) continue
+      const text = blob.baseBytes.toString('utf8')
+      for (const identifier of V024_IDENTIFIERS) {
+        if (text.includes(identifier)) violations.push(`post-revert ${target} still carries the v0.24 identifier ${identifier}`)
+      }
+    }
+    return violations
+  }
+
+  // -- NO-MUTATION (before): the working tree state at the start of the
+  // -- simulation; the simulation must leave it byte-identical.
+  const statusBefore = git('status', '--porcelain')
+  assert.equal(statusBefore.status, 0, 'the pre-simulation working tree status must resolve')
+
+  // -- ANCHORS: the baseline is reachable and HEAD resolves (fail closed).
+  const rev = git('rev-parse', '--verify', `${BASELINE_COMMIT}^{commit}`)
+  assert.equal(rev.status, 0,
+    `baseline ${BASELINE_COMMIT} must be a reachable commit (git unavailable or ref missing — failing closed)`)
+  assert.equal(rev.output.trim(), BASELINE_COMMIT)
+  const head = git('rev-parse', 'HEAD')
+  assert.equal(head.status, 0, 'HEAD must resolve to a commit (not a git checkout — failing closed)')
+
+  // -- P2B5C3-SET + BYTES + V016: the rollback simulation over the real
+  // -- BASELINE..HEAD range proves every contract clause with no violations,
+  // -- every recovered git object hashes to the exact pinned blob id, and the
+  // -- worktree production files are anchored to HEAD.
+  const sim = simulateRollbackRange(BASELINE_COMMIT, 'HEAD')
+  assert.deepEqual(rollbackViolations(sim), [],
+    'the rollback simulation must prove the exact two-path revert set, the byte-exact 301/0 additive delta, the three-handler-only removed mapping and the v0.16-only post-revert contents with no violations')
+  assert.deepEqual([...sim.statuses.entries()].sort(),
+    [['lib/capability-manifest.mjs', 'M'], ['lib/runtime.mjs', 'M']],
+    'the revert set must be exactly the two approved lib mapping files')
+  assert.equal(REVERT_SET.filter((target) => target.startsWith('vendor/')).length, 0,
+    'the revert set must be disjoint from vendor')
+  assert.equal(sim.vendorRangePaths.size, V0240_FILE_COUNT,
+    'the range vendor paths must be exactly the 16 pinned additions, all outside the revert set')
+  assert.equal(sim.addedLines, TOTAL_ADDED, 'restoring the baseline must remove exactly the 301-line additive delta')
+  assert.equal(sim.removedLines, 0, 'the additive delta must carry zero removals')
+  for (const [target, expected] of LIB_DELTA) {
+    assert.deepEqual(sim.libNumstat.get(target), expected,
+      `the lib delta for ${target} must be exactly the purely additive ${expected.added}/0`)
+  }
+  for (const target of REVERT_SET) {
+    const blob = sim.blobs.get(target)
+    assert.ok(blob, `the simulation must recover the baseline and head git objects for ${target}`)
+    assert.equal(blob.baseBlobId, BASE_BLOB.get(target), `the baseline blob for ${target} must be the exact pinned baseline git object`)
+    assert.equal(blob.headBlobId, HEAD_BLOB.get(target), `the head blob for ${target} must be the exact pinned head git object`)
+    assert.ok(blob.baseOk, `the recovered baseline bytes for ${target} must hash to the exact baseline blob (byte-exact restoration)`)
+    assert.ok(blob.headOk, `the recovered head bytes for ${target} must hash to the exact head blob (byte-exact current state)`)
+    const worktree = await readFile(path.join(packageRoot, target))
+    assert.equal(Buffer.compare(worktree, blob.headBytes), 0,
+      `the worktree production file ${target} must be anchored to HEAD (byte-identical to the head git object)`)
+  }
+
+  // -- P2B5C3-V016: both vendor pins remain green at the P2B5C1 anchors — the
+  // -- simulation touches only in-memory lib bytes, so the on-disk
+  // -- (HEAD-anchored) trees are the post-revert truth.
+  const v016Tree = await aggregateTree(path.join(packageRoot, manifest.root))
+  assert.equal(v016Tree.count, V016_FILE_COUNT, 'the v0.16.0 tree must remain exactly the 73 pinned files after the simulated rollback')
+  assert.equal(v016Tree.digest, V016_DIGEST, 'the v0.16.0 tree must remain byte-identical to the pinned digest after the simulated rollback')
+  const v024Tree = await aggregateTree(path.join(packageRoot, closure.root))
+  assert.equal(v024Tree.count, V0240_FILE_COUNT, 'the v0.24.0 tree must remain exactly the 16 pinned files after the simulated rollback')
+  assert.equal(v024Tree.digest, V0240_DIGEST, 'the v0.24.0 tree must remain byte-identical to the pinned digest after the simulated rollback')
+
+  // -- P2B5C3-RED CONTROL: with the v0.24 vendor closure absent from the
+  // -- range (the baseline state, BASELINE..BASELINE), the same predicate
+  // -- must fail closed with the exact closure-absent signature: both lib
+  // -- mapping files missing from the revert set and the delta, no 301/0
+  // -- delta to remove, and all three pinned v0.24 handler references absent
+  // -- from the removed mapping (8 violations).
+  const absent = simulateRollbackRange(BASELINE_COMMIT, BASELINE_COMMIT)
+  const absentViolations = rollbackViolations(absent)
+  assert.ok(absentViolations.length > 0, 'the rollback simulation must fail closed when the v0.24 vendor closure is absent from the range')
+  assert.equal(absentViolations.length, 8, 'the closure-absent signature must carry exactly 8 violations')
+  assert.equal(absentViolations.filter((v) => v.startsWith('missing revert path ')).length, 2,
+    'the closure-absent signature must report both lib mapping files missing from the revert set')
+  assert.equal(absentViolations.filter((v) => v.startsWith('missing lib numstat ')).length, 2,
+    'the closure-absent signature must report both lib mapping files missing from the delta')
+  assert.equal(absentViolations.filter((v) => v.startsWith('missing removed v0.24 handler reference ')).length, 3,
+    'the closure-absent signature must report all three pinned v0.24 handler references missing from the removed mapping')
+  assert.ok(absentViolations.includes(`whole-lib delta ${absent.addedLines}/${absent.removedLines} is not the exact 301/0 additive delta`),
+    'the closure-absent signature must report the empty delta as not the exact 301/0 additive delta')
+
+  // -- P2B5C3-NO-MUTATION (after): the simulation (every git call above plus
+  // -- the read-only tree walks) must leave the worktree and index
+  // -- byte-identical; no git, worktree or external write was performed.
+  const statusAfter = git('status', '--porcelain')
+  assert.equal(statusAfter.status, 0, 'the post-simulation working tree status must resolve')
+  assert.equal(statusAfter.output, statusBefore.output,
+    'the simulated rollback must leave the worktree and index byte-identical (no git or worktree write)')
+
+  // -- P2B5C3-NO-PRODUCTION: this leaf's own change is confined to
+  // -- test/runtime.test.mjs. Post-commit runs: the leaf commit, located by
+  // -- its subject marker, touches exactly that one path. Pre-commit (this
+  // -- leaf's own gate): the uncommitted delta is exactly that one modified
+  // -- path carrying the P2B5C3 marker. The committed range facts above are
+  // -- the primary proof; uncommitted status is never the sole proof.
+  const leafLog = git('log', '--fixed-strings', '--format=%H', '--grep=#65 P2B5C3')
+  assert.equal(leafLog.status, 0, 'the leaf commit lookup must resolve')
+  const leafCommits = leafLog.output.trim() ? leafLog.output.trim().split('\n') : []
+  if (leafCommits.length > 0) {
+    const leafShow = git('show', '--name-status', '--format=', leafCommits[0])
+    assert.equal(leafShow.status, 0, 'the leaf commit must resolve')
+    const leafEntries = leafShow.output.trim().split('\n').filter(Boolean).map((line) => line.split('\t'))
+    assert.deepEqual(leafEntries, [['M', 'test/runtime.test.mjs']],
+      'the committed leaf change must touch exactly test/runtime.test.mjs and nothing else')
+  } else {
+    const status = git('status', '--porcelain')
+    assert.equal(status.status, 0, 'the working tree status must resolve')
+    const trimmedTrailing = status.output.replace(/\n+$/, '')
+    const lines = trimmedTrailing === '' ? [] : trimmedTrailing.split('\n')
+    assert.equal(lines.length, 1, 'pre-commit the uncommitted delta must be a single path')
+    const [xy, pendingPath] = [lines[0].slice(0, 2), lines[0].slice(3)]
+    assert.ok(xy.includes('M') && !xy.includes('?') && !xy.includes('D'),
+      `pre-commit the delta must be a modification (got "${lines[0]}")`)
+    assert.equal(pendingPath, 'test/runtime.test.mjs', 'pre-commit the delta must be exactly test/runtime.test.mjs')
+    const pendingDiff = git('diff', 'HEAD', '--', 'test/runtime.test.mjs')
+    assert.equal(pendingDiff.status, 0, 'the pending test diff must resolve')
+    assert.ok(pendingDiff.output.includes('P2B5C3'), 'the pending change must carry the P2B5C3 marker (this leaf\'s change)')
+  }
+})
