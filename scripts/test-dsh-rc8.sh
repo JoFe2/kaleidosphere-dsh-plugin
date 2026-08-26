@@ -90,6 +90,15 @@ const active = require(process.argv[2])
 const expected = require(process.argv[3])
 if (active.state !== 'ACTIVE' || active.tools.length !== 6 || active.results.length !== 6) process.exit(1)
 if (active.schemas.length !== 3 || active.invalid.length !== 3) process.exit(1)
+const forbidden = new Set(['search', 'details', 'overview', 'kaleidosphere_search', 'kaleidosphere_details', 'kaleidosphere_overview', 'bi.object.search.read', 'bi.object.details.read', 'bi.database.overview.read'])
+if (!Array.isArray(active.completeHostSchemaNames) || !Array.isArray(active.completeHostSchemaRecords) || active.completeHostSchemaRecords.length !== active.completeHostSchemaNames.length || typeof active.completeHostSchemaDigest !== 'string' || !/^sha256:[a-f0-9]{64}$/.test(active.completeHostSchemaDigest)) process.exit(1)
+if (JSON.stringify(active.completeHostSchemaNames) !== JSON.stringify([...active.completeHostSchemaNames].sort()) || JSON.stringify(active.completeHostSchemaRecords.map(x => x.name).sort()) !== JSON.stringify(active.completeHostSchemaNames)) process.exit(1)
+function denyMappedMetadata(value, key = '') {
+  if (typeof value === 'string' && (key === '' || /(?:^|name|action|capabilit(?:y|ies)|tool|schema|identifier|id)$/i.test(key)) && forbidden.has(value)) process.exit(1)
+  if (Array.isArray(value)) for (const item of value) denyMappedMetadata(item, key)
+  else if (value && typeof value === 'object') for (const [childKey, childValue] of Object.entries(value)) denyMappedMetadata(childValue, childKey)
+}
+for (const record of active.completeHostSchemaRecords) denyMappedMetadata(record)
 for (const schema of active.schemas) {
   const parameters = schema.parameters
   if (parameters?.type !== 'object' || typeof parameters.properties !== 'object') process.exit(1)
@@ -127,11 +136,15 @@ if (local.hostSurface.capabilities.some(x => ['search', 'details', 'overview'].i
 if (local.hostSurface.capabilities.some(x => ['bi.object.search.read', 'bi.object.details.read', 'bi.database.overview.read'].includes(x.capabilityId) || ['Search', 'Details', 'Overview'].includes(x.name))) process.exit(1)
 if (local.executionBinding?.boundary !== 'IN_PLUGIN_PROCESS_LOCAL_RUNTIME_NOT_HOST_TOOL') process.exit(1)
 if (!Number.isSafeInteger(local.executionBinding?.processId) || local.executionBinding.processId !== dshPid) process.exit(1)
-if (!Number.isSafeInteger(local.executionBinding?.generation) || local.hostSchemaNames?.join(',') !== expectedTools.join(',') || !Array.isArray(local.completeHostSchemaNames) || !expectedTools.every(name => local.completeHostSchemaNames.includes(name))) process.exit(1)
+if (!Number.isSafeInteger(local.executionBinding?.generation) || local.hostSchemaNames?.join(',') !== expectedTools.join(',') || !Array.isArray(local.completeHostSchemaNames) || !expectedTools.every(name => local.completeHostSchemaNames.includes(name)) || typeof local.completeHostSchemaDigest !== 'string' || !/^sha256:[a-f0-9]{64}$/.test(local.completeHostSchemaDigest)) process.exit(1)
+if (local.completeHostSchemaNames.filter(name => name.startsWith('kaleidosphere_')).sort().join(',') !== expectedTools.join(',')) process.exit(1)
+if (local.completeHostSchemaNames.some(name => ['search', 'details', 'overview', 'kaleidosphere_search', 'kaleidosphere_details', 'kaleidosphere_overview', 'bi.object.search.read', 'bi.object.details.read', 'bi.database.overview.read'].includes(name))) process.exit(1)
 if (matrix.engine !== 'mssql' || matrix.classes.length !== 7 || matrix.cases.length !== 16) process.exit(1)
 if (matrix.executionBinding?.boundary !== 'IN_PLUGIN_PROCESS_LOCAL_RUNTIME_NOT_HOST_TOOL') process.exit(1)
 if (matrix.executionBinding.processId !== local.executionBinding.processId || matrix.executionBinding.generation !== local.executionBinding.generation) process.exit(1)
-if (matrix.hostSchemaNames?.join(',') !== expectedTools.join(',')) process.exit(1)
+if (matrix.hostSchemaNames?.join(',') !== expectedTools.join(',') || matrix.completeHostSchemaNames?.join(',') !== local.completeHostSchemaNames.join(',') || matrix.completeHostSchemaDigest !== local.completeHostSchemaDigest) process.exit(1)
+if (matrix.completeHostSchemaNames.filter(name => name.startsWith('kaleidosphere_')).sort().join(',') !== expectedTools.join(',')) process.exit(1)
+if (matrix.completeHostSchemaNames.some(name => ['search', 'details', 'overview', 'kaleidosphere_search', 'kaleidosphere_details', 'kaleidosphere_overview', 'bi.object.search.read', 'bi.object.details.read', 'bi.database.overview.read'].includes(name))) process.exit(1)
 if (!matrix.cases.every(x => x.code.startsWith('KS_') || x.code.startsWith('DB_') || x.code === 'AbortError')) process.exit(1)
 NODE
 fixture_digest_snapshot >"$evidence_dir/fixture-digests-after.json"

@@ -1,4 +1,5 @@
 import { existsSync, writeFileSync } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { runLocalSurfaceProbe } from './local-surface.mjs'
 import { runNegativeMatrix } from './negative-matrix.mjs'
 
@@ -10,8 +11,49 @@ function writeJson(filename, value) {
   writeFileSync(filename, `${JSON.stringify(value, null, 2)}\n`)
 }
 
-function available(ctx, { allowEmpty = false } = {}) {
-  const allSchemaNames = ctx.tools.schemas().map(item => item.name).sort()
+const FORBIDDEN_MAPPED_EXPOSURE = new Set([
+  'search', 'details', 'overview',
+  'kaleidosphere_search', 'kaleidosphere_details', 'kaleidosphere_overview',
+  'bi.object.search.read', 'bi.object.details.read', 'bi.database.overview.read',
+])
+
+function canonicalize(value) {
+  if (Array.isArray(value)) return value.map(canonicalize)
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.keys(value).sort().map(key => [key, canonicalize(value[key])]))
+  }
+  return value
+}
+
+function schemaCatalog(ctx) {
+  const records = ctx.tools.schemas().map(canonicalize)
+  const sortedRecords = records.sort((left, right) => {
+    const leftKey = `${left.name ?? ''}\u0000${JSON.stringify(left)}`
+    const rightKey = `${right.name ?? ''}\u0000${JSON.stringify(right)}`
+    return leftKey < rightKey ? -1 : leftKey > rightKey ? 1 : 0
+  })
+  const completeHostSchemaNames = sortedRecords.map(item => item.name).sort()
+  const completeHostSchemaDigest = `sha256:${createHash('sha256').update(JSON.stringify(sortedRecords)).digest('hex')}`
+  for (const record of sortedRecords) {
+    assertNoForbiddenExposure(record)
+  }
+  return { records: sortedRecords, completeHostSchemaNames, completeHostSchemaDigest }
+}
+
+function assertNoForbiddenExposure(value, key = '') {
+  if (typeof value === 'string' && (key === '' || /(?:^|name|action|capabilit(?:y|ies)|tool|schema|identifier|id)$/i.test(key))) {
+    if (FORBIDDEN_MAPPED_EXPOSURE.has(value)) throw new Error(`forbidden mapped exposure: ${value}`)
+    return
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) assertNoForbiddenExposure(item, key)
+  } else if (value && typeof value === 'object') {
+    for (const [childKey, childValue] of Object.entries(value)) assertNoForbiddenExposure(childValue, childKey)
+  }
+}
+
+function available(catalog, { allowEmpty = false } = {}) {
+  const allSchemaNames = catalog.completeHostSchemaNames
   const schemaNames = allSchemaNames.filter(name => name.startsWith('kaleidosphere_'))
   const expected = [...expectedNames].sort()
   if (!(allowEmpty && schemaNames.length === 0) && (schemaNames.length !== expected.length || schemaNames.some((name, index) => name !== expected[index]))) {
@@ -20,12 +62,8 @@ function available(ctx, { allowEmpty = false } = {}) {
   return schemaNames
 }
 
-function allSchemaNames(ctx) {
-  return ctx.tools.schemas().map(item => item.name).sort()
-}
-
-function parameterizedSchemas(ctx) {
-  return ctx.tools.schemas().filter(item => [
+function parameterizedSchemas(catalog) {
+  return catalog.records.filter(item => [
     'kaleidosphere_discovery',
     'kaleidosphere_plan',
     'kaleidosphere_preview',
@@ -88,9 +126,10 @@ export function apply(ctx) {
     stopped = true
     try {
       if (phase === 'boot') {
-        const tools = available(ctx)
+        const catalog = schemaCatalog(ctx)
+        const tools = available(catalog)
         const hostSchemaNames = [...tools]
-        const completeHostSchemaNames = allSchemaNames(ctx)
+        const { completeHostSchemaNames, completeHostSchemaDigest, records: completeHostSchemaRecords } = catalog
         const results = process.env.KS_PROBE_MODE === 'inventory'
           ? []
           : process.env.KS_PROBE_MODE === 'status'
@@ -99,16 +138,18 @@ export function apply(ctx) {
         if (process.env.KS_PROBE_MODE !== 'inventory' && process.env.KS_PROBE_MODE !== 'status') {
           const localSurface = await runLocalSurfaceProbe({ hostSchemaNames, executionBinding })
           const negativeMatrix = await runNegativeMatrix({ hostSchemaNames, executionBinding })
-          writeJson(process.env.KS_PROBE_LOCAL_SURFACE, { ...localSurface, executionBinding, hostSchemaNames, completeHostSchemaNames })
-          writeJson(process.env.KS_PROBE_NEGATIVE_MATRIX, { ...negativeMatrix, executionBinding, hostSchemaNames, completeHostSchemaNames })
+          writeJson(process.env.KS_PROBE_LOCAL_SURFACE, { ...localSurface, executionBinding, hostSchemaNames, completeHostSchemaNames, completeHostSchemaDigest })
+          writeJson(process.env.KS_PROBE_NEGATIVE_MATRIX, { ...negativeMatrix, executionBinding, hostSchemaNames, completeHostSchemaNames, completeHostSchemaDigest })
         }
         writeJson(process.env.KS_PROBE_ACTIVE, {
           state: 'ACTIVE',
           tools,
           hostSchemaNames,
           completeHostSchemaNames,
+          completeHostSchemaRecords,
+          completeHostSchemaDigest,
           executionBinding,
-          schemas: parameterizedSchemas(ctx),
+          schemas: parameterizedSchemas(catalog),
           results,
           invalid: await executeInvalid(ctx),
         })
@@ -123,17 +164,19 @@ export function apply(ctx) {
         phase = 'await-unload'
       } else if (phase === 'await-unload') {
         if (!existsSync(process.env.KS_PROBE_UNLOAD_REQUEST)) return
-        const unloadedTools = available(ctx, { allowEmpty: true })
+        const catalog = schemaCatalog(ctx)
+        const unloadedTools = available(catalog, { allowEmpty: true })
         if (unloadedTools.length !== 0) return
         writeJson(process.env.KS_PROBE_UNLOADED, { state: 'UNLOADED', tools: unloadedTools, hostSchemaNames: unloadedTools, executionBinding })
         phase = 'await-reload'
       } else if (phase === 'await-reload') {
         if (!existsSync(process.env.KS_PROBE_RELOAD_REQUEST)) return
-        const hostSchemaNames = available(ctx)
+        const catalog = schemaCatalog(ctx)
+        const hostSchemaNames = available(catalog)
         if (hostSchemaNames.length !== names.length) return
         const status = await ctx.tools.execute({ signal, callId: 'ks-probe-reloaded', name: 'kaleidosphere_status', arguments: {} })
         if (status.isError) throw new Error('reloaded status failed')
-        writeJson(process.env.KS_PROBE_RELOADED, { state: 'RELOADED', tools: hostSchemaNames, hostSchemaNames, status: status.value, executionBinding })
+        writeJson(process.env.KS_PROBE_RELOADED, { state: 'RELOADED', tools: hostSchemaNames, hostSchemaNames, completeHostSchemaNames: catalog.completeHostSchemaNames, completeHostSchemaRecords: catalog.records, completeHostSchemaDigest: catalog.completeHostSchemaDigest, status: status.value, executionBinding })
         process.emit('SIGTERM')
       }
     } catch (error) {
