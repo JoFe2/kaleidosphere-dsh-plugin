@@ -8,7 +8,9 @@ const expectedNames = process.env.KS_PROBE_EXPECTED_TOOL_NAMES?.split(',').filte
 const signal = new AbortController().signal
 
 function writeJson(filename, value) {
-  writeFileSync(filename, `${JSON.stringify(value, null, 2)}\n`)
+  const runId = process.env.KS_PROBE_RUN_ID
+  if (typeof runId !== 'string' || runId.length === 0) throw new Error('missing fresh probe run id')
+  writeFileSync(filename, `${JSON.stringify({ ...value, runId }, null, 2)}\n`)
 }
 
 const FORBIDDEN_MAPPED_EXPOSURE = new Set([
@@ -40,15 +42,15 @@ function schemaCatalog(ctx) {
   return { records: sortedRecords, completeHostSchemaNames, completeHostSchemaDigest }
 }
 
-function assertNoForbiddenExposure(value, key = '') {
-  if (typeof value === 'string' && (key === '' || /(?:^|name|action|capabilit(?:y|ies)|tool|schema|identifier|id)$/i.test(key))) {
+export function assertNoForbiddenExposure(value) {
+  if (typeof value === 'string') {
     if (FORBIDDEN_MAPPED_EXPOSURE.has(value)) throw new Error(`forbidden mapped exposure: ${value}`)
     return
   }
   if (Array.isArray(value)) {
-    for (const item of value) assertNoForbiddenExposure(item, key)
+    for (const item of value) assertNoForbiddenExposure(item)
   } else if (value && typeof value === 'object') {
-    for (const [childKey, childValue] of Object.entries(value)) assertNoForbiddenExposure(childValue, childKey)
+    for (const childValue of Object.values(value)) assertNoForbiddenExposure(childValue)
   }
 }
 
