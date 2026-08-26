@@ -14,7 +14,13 @@ assert.equal(manifest.peerDependencies['@deepseek-ai/dsh-tools'], '0.1.0-rc.8')
 
 const temp = await mkdtemp(path.join(os.tmpdir(), 'ks-dsh-pack-'))
 try {
-  const output = execFileSync('npm', ['pack', '--json', '--pack-destination', temp], { cwd: root, encoding: 'utf8' })
+  // The pack subprocess must own a private, writable npm cache under this already
+  // disposable temp root: the gate must not rely on $HOME (or the repository / a
+  // persistent global dir) being writable, so it stays reproducible even when HOME
+  // is an empty read-only directory (PF-2). The cache is removed with `temp` in the
+  // finally block.
+  const packCache = path.join(temp, 'npm-cache')
+  const output = execFileSync('npm', ['pack', '--json', '--pack-destination', temp, '--cache', packCache], { cwd: root, encoding: 'utf8' })
   const [packed] = JSON.parse(output)
   const paths = packed.files.map(item => item.path)
   // The pack must carry the runtime entry points, the patch, the docs, the
