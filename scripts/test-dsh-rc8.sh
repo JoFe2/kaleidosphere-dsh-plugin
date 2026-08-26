@@ -47,14 +47,22 @@ export PATH="$tools_root/node_modules/.bin:$bin_root:$PATH"
 export DSH_HOME="$dsh_home"
 export TMPDIR="$runtime_tmp"
 
+# One exact flagged launcher: dsh_launch is a simple command array so a
+# backgrounded launch execs node directly (dsh_pid stays the dsh process
+# id) and every DSH launch runs the pinned rc.8 CLI entry with the required
+# --expose-internals execArgv (Node 24 rejects that flag in NODE_OPTIONS).
+dsh_entry="$tools_root/node_modules/@deepseek-ai/dsh/lib/bin.js"
+[[ -f "$dsh_entry" ]]
+dsh_launch=(node --expose-internals "$dsh_entry")
+
 pack_json="$(cd "$repo_root" && npm pack --json --pack-destination "$run_root" --silent)"
 pack_name="$(node -e 'const fs=require("fs");const x=JSON.parse(fs.readFileSync(0,"utf8"));process.stdout.write(x[0].filename)' <<<"$pack_json")"
 package_file="$run_root/$pack_name"
 plugin_spec="${PLUGIN_SPEC:-$package_file}"
 
-dsh plugin --profile "$profile_name" add "$plugin_spec" >"$evidence_dir/add.log" 2>&1
-dsh plugin --profile "$profile_name" add "$repo_root/test/dsh-probe-bundle" >"$evidence_dir/add-probe.log" 2>&1
-dsh --profile "$profile_name" --dump-config >"$evidence_dir/dump-config-installed.txt"
+"${dsh_launch[@]}" plugin --profile "$profile_name" add "$plugin_spec" >"$evidence_dir/add.log" 2>&1
+"${dsh_launch[@]}" plugin --profile "$profile_name" add "$repo_root/test/dsh-probe-bundle" >"$evidence_dir/add-probe.log" 2>&1
+"${dsh_launch[@]}" --profile "$profile_name" --dump-config >"$evidence_dir/dump-config-installed.txt"
 grep -Fq '# == kaleidosphere-dsh-plugin' "$evidence_dir/dump-config-installed.txt"
 grep -Fq 'id: kaleidosphere-dsh-plugin' "$evidence_dir/dump-config-installed.txt"
 
@@ -74,7 +82,7 @@ fixture_digest_snapshot >"$evidence_dir/fixture-digests-before.json"
 export KS_PROBE_LOCAL_SURFACE="$evidence_dir/local-surface.json"
 export KS_PROBE_NEGATIVE_MATRIX="$evidence_dir/negative-matrix.json"
 
-dsh --profile "$profile_name" >"$evidence_dir/dsh.log" 2>&1 &
+"${dsh_launch[@]}" --profile "$profile_name" >"$evidence_dir/dsh.log" 2>&1 &
 dsh_pid=$!
 
 wait_for_file() {
@@ -195,19 +203,19 @@ unset dsh_pid
 [[ -f "$KS_PROBE_DISPOSED" ]]
 [[ "$(find "$runtime_tmp" -maxdepth 1 -type d -name 'kaleidosphere-dsh-*' | wc -l)" -eq 0 ]]
 
-dsh plugin --profile "$profile_name" remove kaleidosphere-dsh-plugin >"$evidence_dir/remove.log" 2>&1
-dsh --profile "$profile_name" --dump-config >"$evidence_dir/dump-config-removed.txt"
+"${dsh_launch[@]}" plugin --profile "$profile_name" remove kaleidosphere-dsh-plugin >"$evidence_dir/remove.log" 2>&1
+"${dsh_launch[@]}" --profile "$profile_name" --dump-config >"$evidence_dir/dump-config-removed.txt"
 ! grep -Eq '# == kaleidosphere-dsh-plugin|id: kaleidosphere-dsh-plugin' "$evidence_dir/dump-config-removed.txt"
 node -e 'const p=require(process.argv[1]); if(p.dependencies?.["kaleidosphere-dsh-plugin"]||p.dsh.profile.bundles.includes("kaleidosphere-dsh-plugin")) process.exit(1)' "$profile_dir/package.json"
 
-dsh plugin --profile "$profile_name" add "$plugin_spec" >"$evidence_dir/reinstall.log" 2>&1
-dsh --profile "$profile_name" --dump-config >"$evidence_dir/dump-config-reinstalled.txt"
+"${dsh_launch[@]}" plugin --profile "$profile_name" add "$plugin_spec" >"$evidence_dir/reinstall.log" 2>&1
+"${dsh_launch[@]}" --profile "$profile_name" --dump-config >"$evidence_dir/dump-config-reinstalled.txt"
 grep -Fq '# == kaleidosphere-dsh-plugin' "$evidence_dir/dump-config-reinstalled.txt"
 
 export KS_PROBE_ACTIVE="$evidence_dir/active-reinstall.json"
 export KS_PROBE_DISPOSED="$evidence_dir/disposed-reinstall.txt"
 export KS_PROBE_MODE=oneshot
-dsh --profile "$profile_name" >"$evidence_dir/dsh-reinstall.log" 2>&1 &
+"${dsh_launch[@]}" --profile "$profile_name" >"$evidence_dir/dsh-reinstall.log" 2>&1 &
 dsh_pid=$!
 wait_for_file "$KS_PROBE_ACTIVE"
 assert_run_bound_json "$KS_PROBE_ACTIVE"
@@ -217,26 +225,26 @@ unset dsh_pid
 [[ "$(find "$runtime_tmp" -maxdepth 1 -type d -name 'kaleidosphere-dsh-*' | wc -l)" -eq 0 ]]
 export KS_PROBE_RESIDUE=ZERO
 
-dsh plugin --profile "$profile_name" remove kaleidosphere-dsh-plugin kaleidosphere-dsh-probe >"$evidence_dir/remove-final.log" 2>&1
+"${dsh_launch[@]}" plugin --profile "$profile_name" remove kaleidosphere-dsh-plugin kaleidosphere-dsh-probe >"$evidence_dir/remove-final.log" 2>&1
 node -e 'const p=require(process.argv[1]); if(Object.keys(p.dependencies||{}).length||p.dsh.profile.bundles.some(x=>/kaleidosphere/.test(x))) process.exit(1)' "$profile_dir/package.json"
 
 invalid_profile=ks-invalid
 invalid_profile_dir="$dsh_home/profiles/$invalid_profile"
-dsh plugin --profile "$invalid_profile" add "$plugin_spec" >"$evidence_dir/add-invalid.log" 2>&1
+"${dsh_launch[@]}" plugin --profile "$invalid_profile" add "$plugin_spec" >"$evidence_dir/add-invalid.log" 2>&1
 printf '%s\n' '- id: kaleidosphere-dsh-plugin' '  config:' '    source:' '      mode: remote' >"$invalid_profile_dir/cordis.patch.yml"
-if dsh --profile "$invalid_profile" >"$evidence_dir/invalid-config.log" 2>&1; then
+if "${dsh_launch[@]}" --profile "$invalid_profile" >"$evidence_dir/invalid-config.log" 2>&1; then
   echo 'invalid configuration unexpectedly loaded' >&2
   exit 1
 fi
 grep -Fq 'KS_DSH_SOURCE_MODE_INVALID' "$evidence_dir/invalid-config.log"
-dsh plugin --profile "$invalid_profile" remove kaleidosphere-dsh-plugin >"$evidence_dir/remove-invalid.log" 2>&1
+"${dsh_launch[@]}" plugin --profile "$invalid_profile" remove kaleidosphere-dsh-plugin >"$evidence_dir/remove-invalid.log" 2>&1
 node -e 'const p=require(process.argv[1]); if(Object.keys(p.dependencies||{}).length||p.dsh.profile.bundles.some(x=>/kaleidosphere/.test(x))) process.exit(1)' "$invalid_profile_dir/package.json"
 
 if [[ "$advanced_features" = 1 ]]; then
 toggled_profile=ks-toggled
 toggled_profile_dir="$dsh_home/profiles/$toggled_profile"
-dsh plugin --profile "$toggled_profile" add "$plugin_spec" >"$evidence_dir/add-toggled.log" 2>&1
-dsh plugin --profile "$toggled_profile" add "$repo_root/test/dsh-probe-bundle" >"$evidence_dir/add-toggled-probe.log" 2>&1
+"${dsh_launch[@]}" plugin --profile "$toggled_profile" add "$plugin_spec" >"$evidence_dir/add-toggled.log" 2>&1
+"${dsh_launch[@]}" plugin --profile "$toggled_profile" add "$repo_root/test/dsh-probe-bundle" >"$evidence_dir/add-toggled-probe.log" 2>&1
 printf '%s\n' \
   '- id: kaleidosphere-dsh-plugin' \
   '  config:' \
@@ -249,7 +257,7 @@ export KS_PROBE_ACTIVE="$evidence_dir/active-toggled.json"
 export KS_PROBE_DISPOSED="$evidence_dir/disposed-toggled.txt"
 export KS_PROBE_MODE=inventory
 export KS_PROBE_EXPECTED_TOOL_NAMES='kaleidosphere_status,kaleidosphere_discovery,kaleidosphere_analyze,kaleidosphere_plan,kaleidosphere_readback'
-dsh --profile "$toggled_profile" >"$evidence_dir/dsh-toggled.log" 2>&1 &
+"${dsh_launch[@]}" --profile "$toggled_profile" >"$evidence_dir/dsh-toggled.log" 2>&1 &
 dsh_pid=$!
 wait_for_file "$KS_PROBE_ACTIVE"
 assert_run_bound_json "$KS_PROBE_ACTIVE"
@@ -258,7 +266,7 @@ unset dsh_pid KS_PROBE_EXPECTED_TOOL_NAMES
 node -e 'const x=require(process.argv[1]); if(x.tools.length!==5||x.tools.includes("kaleidosphere_preview")||x.results.length!==0) process.exit(1)' "$KS_PROBE_ACTIVE"
 [[ -f "$KS_PROBE_DISPOSED" ]]
 [[ "$(find "$runtime_tmp" -maxdepth 1 -type d -name 'kaleidosphere-dsh-*' | wc -l)" -eq 0 ]]
-dsh plugin --profile "$toggled_profile" remove kaleidosphere-dsh-plugin kaleidosphere-dsh-probe >"$evidence_dir/remove-toggled.log" 2>&1
+"${dsh_launch[@]}" plugin --profile "$toggled_profile" remove kaleidosphere-dsh-plugin kaleidosphere-dsh-probe >"$evidence_dir/remove-toggled.log" 2>&1
 node -e 'const p=require(process.argv[1]); if(Object.keys(p.dependencies||{}).length||p.dsh.profile.bundles.some(x=>/kaleidosphere/.test(x))) process.exit(1)' "$toggled_profile_dir/package.json"
 
 external_ready="$run_root/external.url"
@@ -271,8 +279,8 @@ wait_for_file "$external_ready"
 external_url="$(<"$external_ready")"
 external_profile=ks-external
 external_profile_dir="$dsh_home/profiles/$external_profile"
-dsh plugin --profile "$external_profile" add "$plugin_spec" >"$evidence_dir/add-external.log" 2>&1
-dsh plugin --profile "$external_profile" add "$repo_root/test/dsh-probe-bundle" >"$evidence_dir/add-external-probe.log" 2>&1
+"${dsh_launch[@]}" plugin --profile "$external_profile" add "$plugin_spec" >"$evidence_dir/add-external.log" 2>&1
+"${dsh_launch[@]}" plugin --profile "$external_profile" add "$repo_root/test/dsh-probe-bundle" >"$evidence_dir/add-external-probe.log" 2>&1
 printf '%s\n' \
   '- id: kaleidosphere-dsh-plugin' \
   '  config:' \
@@ -291,7 +299,7 @@ export KS_PROBE_ACTIVE="$evidence_dir/active-external.json"
 export KS_PROBE_DISPOSED="$evidence_dir/disposed-external.txt"
 export KS_PROBE_MODE=status
 export KS_PROBE_EXPECTED_TOOL_NAMES='kaleidosphere_status'
-dsh --profile "$external_profile" >"$evidence_dir/dsh-external.log" 2>&1 &
+"${dsh_launch[@]}" --profile "$external_profile" >"$evidence_dir/dsh-external.log" 2>&1 &
 dsh_pid=$!
 wait_for_file "$KS_PROBE_ACTIVE"
 assert_run_bound_json "$KS_PROBE_ACTIVE"
@@ -304,7 +312,7 @@ node -e 'const fs=require("fs");const x=fs.readFileSync(process.argv[1],"utf8").
 kill -TERM "$external_pid"
 wait "$external_pid"
 unset external_pid
-dsh plugin --profile "$external_profile" remove kaleidosphere-dsh-plugin kaleidosphere-dsh-probe >"$evidence_dir/remove-external.log" 2>&1
+"${dsh_launch[@]}" plugin --profile "$external_profile" remove kaleidosphere-dsh-plugin kaleidosphere-dsh-probe >"$evidence_dir/remove-external.log" 2>&1
 node -e 'const p=require(process.argv[1]); if(Object.keys(p.dependencies||{}).length||p.dsh.profile.bundles.some(x=>/kaleidosphere/.test(x))) process.exit(1)' "$external_profile_dir/package.json"
 fi
 

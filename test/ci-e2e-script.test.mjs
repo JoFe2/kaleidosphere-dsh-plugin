@@ -89,3 +89,21 @@ test('F3 rejects prefilled caller evidence instead of accepting stale files', as
     error => error.code === 2 && /EVIDENCE_DIR must be empty/.test(error.stderr),
   )
 })
+
+test('PF-1 every lifecycle DSH launch uses the exact flagged rc.8 launcher contract', async () => {
+  const source = await readFile(new URL('../scripts/test-dsh-rc8.sh', import.meta.url), 'utf8')
+  const lines = source.split('\n')
+  // One exact locally pinned rc.8 CLI entry, resolved fail-closed.
+  assert.match(source, /dsh_entry="\$tools_root\/node_modules\/@deepseek-ai\/dsh\/lib\/bin\.js"/, 'exact local rc.8 CLI entry pin missing')
+  assert.match(source, /\[\[ -f "\$dsh_entry" \]\]/, 'CLI entry existence must fail closed')
+  assert.equal(source.split('lib/bin.js').length - 1, 1, 'CLI entry must be pinned exactly once')
+  // One flagged launcher contract: a simple command array carrying the
+  // required --expose-internals execArgv and forwarding every argument.
+  assert.match(source, /dsh_launch=\(node --expose-internals "\$dsh_entry"\)/, 'flagged launcher contract missing')
+  // No bare dsh lifecycle launch may remain, flagged or not.
+  const bare = lines.filter(line => /^[ \t]*(if[ \t]+)?dsh[ \t]/.test(line))
+  assert.deepEqual(bare, [], `bare dsh lifecycle launches remain: ${bare.join(' | ')}`)
+  // Every one of the 21 lifecycle DSH launches goes through the single launcher.
+  const launches = lines.filter(line => /^(if[ \t]+)?"\$\{dsh_launch\[\@\]\}"[ \t]/.test(line))
+  assert.equal(launches.length, 21, 'every lifecycle DSH launch must use the single flagged launcher')
+})
