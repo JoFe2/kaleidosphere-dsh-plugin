@@ -6,6 +6,18 @@ Harness Developer Preview ABI changes.
 
 ## [Unreleased]
 
+## [0.1.0-preview.5] - 2026-08-26
+
+- Add the additive governed v0.24.0 Search, Details, and Overview local
+  runtime mappings over the exactly pinned v0.24.0 vendor handler closure,
+  while retaining the six released tools and the v0.16.0 baseline unchanged.
+- Harden the rc.8 lifecycle: emit run-bound evidence on lifecycle failure,
+  bound the closed-DSH-surface waits after HMR reload and on the fresh-CI host
+  surface, and retain history for frozen-range rollback proofs.
+- Constrain the lifecycle so test:dsh and verify:package run npm/pnpm/corepack
+  with private writable caches under their disposable run roots instead of a
+  shared $HOME, keeping the package gate self-contained and reproducible.
+
 ## [0.1.0-preview.4] - 2026-08-23
 
 - Bind runtime tool exposure to the pinned EMBEDDED or validated EXTERNAL
@@ -48,7 +60,8 @@ Harness Developer Preview ABI changes.
 - Add HMR unload/reload, remove/reinstall, invalid-configuration, package,
   provenance, and exact-rc.8 lifecycle verification.
 
-[Unreleased]: https://github.com/JoFe2/kaleidosphere-dsh-plugin/compare/v0.1.0-preview.4...HEAD
+[Unreleased]: https://github.com/JoFe2/kaleidosphere-dsh-plugin/compare/v0.1.0-preview.5...HEAD
+[0.1.0-preview.5]: https://github.com/JoFe2/kaleidosphere-dsh-plugin/compare/v0.1.0-preview.4...v0.1.0-preview.5
 [0.1.0-preview.4]: https://github.com/JoFe2/kaleidosphere-dsh-plugin/compare/v0.1.0-preview.3...v0.1.0-preview.4
 [0.1.0-preview.3]: https://github.com/JoFe2/kaleidosphere-dsh-plugin/compare/v0.1.0-preview.2...v0.1.0-preview.3
 [0.1.0-preview.2]: https://github.com/JoFe2/kaleidosphere-dsh-plugin/releases/tag/v0.1.0-preview.2
