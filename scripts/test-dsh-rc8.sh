@@ -1,7 +1,16 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -Eeuo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# Failure provenance: with errtrace (set -E) the ERR trap fires on the exact
+# command that aborts the gate, inside functions and subshells, and prints
+# the failing line and command; the EXIT trap below then emits the bounded
+# run-bound evidence logs.
+on_error() {
+  echo "test:dsh FAILED at ${BASH_SOURCE[0]}:$1 (exit=$2): $BASH_COMMAND" >&2
+}
+trap 'on_error "$LINENO" "$?"' ERR
 run_root="$(mktemp -d)"
 if [[ -n "${EVIDENCE_DIR:-}" ]]; then
   # A prefilled caller directory is stale evidence preexists and is rejected.
@@ -16,6 +25,19 @@ runtime_tmp="$run_root/runtime-tmp"
 evidence_dir="$run_root/evidence/$run_id"
 advanced_features="${DSH_EXPECT_ADVANCED_FEATURES:-1}"
 file_timeout_steps="${DSH_FILE_TIMEOUT_STEPS:-1200}"
+process_wait_seconds="${DSH_PROCESS_WAIT_SECONDS:-90}"
+# CI portability: ubuntu-latest hosts are slower than the local and
+# clean-container baselines, so the bounded readiness windows scale up on the
+# GitHub runner only (GITHUB_ACTIONS) and only when the caller has not pinned
+# the hook. The windows stay bounded and fail-closed — a stuck probe still
+# times out and the per-step outer timeout still bounds the whole gate — and
+# a caller override always wins.
+if [[ -n "${GITHUB_ACTIONS:-}" && -z "${DSH_FILE_TIMEOUT_STEPS:-}" ]]; then
+  file_timeout_steps=2400
+fi
+if [[ -n "${GITHUB_ACTIONS:-}" && -z "${DSH_PROCESS_WAIT_SECONDS:-}" ]]; then
+  process_wait_seconds=180
+fi
 profile_name=ks-e2e
 profile_dir="$dsh_home/profiles/$profile_name"
 # NR-1: own disposable package-manager state below the fresh run_root: every
@@ -63,6 +85,7 @@ fi
 
 cleanup() {
   local rc=$?
+  trap - ERR
   if [[ -n "${dsh_pid:-}" ]] && kill -0 "$dsh_pid" 2>/dev/null; then kill -KILL "$dsh_pid" 2>/dev/null || true; fi
   if [[ -n "${external_pid:-}" ]] && kill -0 "$external_pid" 2>/dev/null; then
     kill -TERM "$external_pid" 2>/dev/null || true
@@ -261,7 +284,7 @@ if (x.executionBinding?.boundary !== 'IN_PLUGIN_PROCESS_LOCAL_RUNTIME_NOT_HOST_T
 const status = x.status?.response?.result?.status ?? x.status?.result?.status ?? x.status?.status
 if (typeof status !== 'string' || status.length === 0) process.exit(1)
 NODE
-wait_for_pid "$dsh_pid" 90 dsh
+wait_for_pid "$dsh_pid" "$process_wait_seconds" dsh
 unset dsh_pid
 [[ -f "$KS_PROBE_DISPOSED" ]]
 [[ "$(find "$runtime_tmp" -maxdepth 1 -type d -name 'kaleidosphere-dsh-*' | wc -l)" -eq 0 ]]
@@ -282,7 +305,7 @@ export KS_PROBE_MODE=oneshot
 dsh_pid=$!
 wait_for_file "$KS_PROBE_ACTIVE"
 assert_run_bound_json "$KS_PROBE_ACTIVE"
-wait_for_pid "$dsh_pid" 90 dsh
+wait_for_pid "$dsh_pid" "$process_wait_seconds" dsh
 unset dsh_pid
 [[ -f "$KS_PROBE_DISPOSED" ]]
 [[ "$(find "$runtime_tmp" -maxdepth 1 -type d -name 'kaleidosphere-dsh-*' | wc -l)" -eq 0 ]]
@@ -324,7 +347,7 @@ export KS_PROBE_EXPECTED_TOOL_NAMES='kaleidosphere_status,kaleidosphere_discover
 dsh_pid=$!
 wait_for_file "$KS_PROBE_ACTIVE"
 assert_run_bound_json "$KS_PROBE_ACTIVE"
-wait_for_pid "$dsh_pid" 90 dsh
+wait_for_pid "$dsh_pid" "$process_wait_seconds" dsh
 unset dsh_pid KS_PROBE_EXPECTED_TOOL_NAMES
 node -e 'const x=require(process.argv[1]); if(x.tools.length!==5||x.tools.includes("kaleidosphere_preview")||x.results.length!==0) process.exit(1)' "$KS_PROBE_ACTIVE"
 [[ -f "$KS_PROBE_DISPOSED" ]]
@@ -366,7 +389,7 @@ export KS_PROBE_EXPECTED_TOOL_NAMES='kaleidosphere_status'
 dsh_pid=$!
 wait_for_file "$KS_PROBE_ACTIVE"
 assert_run_bound_json "$KS_PROBE_ACTIVE"
-wait_for_pid "$dsh_pid" 90 dsh
+wait_for_pid "$dsh_pid" "$process_wait_seconds" dsh
 unset dsh_pid KS_PROBE_EXPECTED_TOOL_NAMES
 node -e 'const x=require(process.argv[1]); if(x.tools.length!==1||x.results.length!==1||x.results[0].value?.response?.result?.status!=="EXTERNAL_STUB_READY") process.exit(1)' "$KS_PROBE_ACTIVE"
 [[ -f "$KS_PROBE_DISPOSED" ]]
