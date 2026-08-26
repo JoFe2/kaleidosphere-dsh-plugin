@@ -146,4 +146,15 @@ test('NR-1 lifecycle owns disposable npm/pnpm/corepack state below the fresh run
   assert.match(source, /cp -a "\$state_root\/pnpm\/\." "\$pnpm_home\/"/, 'NR-1: pnpm store seed must stay below run_root')
   assert.match(source, /cp -a "\$state_root\/corepack\/\." "\$corepack_home\/"/, 'NR-1: corepack home seed must stay below run_root')
   assert.match(source, /export npm_config_offline=true/, 'NR-1: constrained lifecycle must resolve dependencies offline only')
+  // F1: pnpm 11.24.0 ignores npm_config_offline; the constrained lifecycle must
+  // also export the exact pnpm-recognized offline configuration so an
+  // incomplete pre-provisioned store cannot silently fetch from a reachable
+  // registry.
+  assert.match(source, /export pnpm_config_offline=true/, 'NR-1 F1: constrained lifecycle must enforce pnpm offline via the exact pnpm-recognized configuration (pnpm ignores npm_config_offline)')
+  // F2: cp -a preserves the read-only source modes; the private run_root copies
+  // are normalized user-writable so pnpm/corepack can write their state, while
+  // the read-only source state root is never chmod'd.
+  assert.match(source, /chmod -R u\+w/, 'NR-1 F2: seeded run_root copies must be normalized user-writable (cp -a preserves read-only source modes)')
+  assert.match(source, /chmod -R u\+w[^\n]*"\$pnpm_home"/, 'NR-1 F2: the pnpm store copy must be made user-writable below run_root')
+  assert.doesNotMatch(source, /chmod[^\n]*"\$state_root/, 'NR-1 F2: the read-only source state root must never be made writable')
 })

@@ -47,7 +47,17 @@ if [[ -n "${DSH_PREPROVISIONED_STATE:-}" ]]; then
   cp -a "$state_root/corepack/." "$corepack_home/"
   cp -a "$state_root/pnpm-state/." "$xdg_state/pnpm/"
   cp -a "$state_root/pnpm-config/." "$xdg_config/pnpm/"
+  # F2: cp -a preserves the read-only source modes; make the private copies
+  # user-writable so pnpm/corepack can write their state. Only the run_root
+  # destination trees are chmod'd — the read-only source state root is never
+  # touched.
+  chmod -R u+w "$pnpm_home" "$xdg_cache/pnpm" "$corepack_home" "$xdg_state/pnpm" "$xdg_config/pnpm"
+  # F1: pnpm 11.24.0 ignores npm_config_offline; also export the exact
+  # pnpm-recognized offline configuration so an incomplete pre-provisioned
+  # store cannot silently fetch from a reachable registry. npm_config_offline
+  # is kept so the npm portion (npm pack) stays explicitly offline too.
   export npm_config_offline=true
+  export pnpm_config_offline=true
 fi
 [[ "$advanced_features" = 0 || "$advanced_features" = 1 ]]
 
