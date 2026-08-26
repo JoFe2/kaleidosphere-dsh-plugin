@@ -62,10 +62,19 @@ fi
 [[ "$advanced_features" = 0 || "$advanced_features" = 1 ]]
 
 cleanup() {
+  local rc=$?
   if [[ -n "${dsh_pid:-}" ]] && kill -0 "$dsh_pid" 2>/dev/null; then kill -KILL "$dsh_pid" 2>/dev/null || true; fi
   if [[ -n "${external_pid:-}" ]] && kill -0 "$external_pid" 2>/dev/null; then
     kill -TERM "$external_pid" 2>/dev/null || true
     wait "$external_pid" 2>/dev/null || true
+  fi
+  if [[ "$rc" -ne 0 && -d "$evidence_dir" ]]; then
+    echo "test:dsh failed (rc=$rc); run-bound evidence logs follow" >&2
+    for evidence_log in "$evidence_dir"/*.log; do
+      [[ -f "$evidence_log" ]] || continue
+      printf '\n=== %s ===\n' "$(basename "$evidence_log")" >&2
+      tail -100 "$evidence_log" >&2
+    done
   fi
   if [[ "${KEEP_DSH_SMOKE:-0}" != 1 ]]; then rm -rf "$run_root"; fi
 }
