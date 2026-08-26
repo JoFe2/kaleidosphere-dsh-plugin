@@ -89,12 +89,17 @@ export XDG_CACHE_HOME="$xdg_cache"
 export XDG_STATE_HOME="$xdg_state"
 export XDG_CONFIG_HOME="$xdg_config"
 export COREPACK_HOME="$corepack_home"
+# N1: the corepack shim enables Node's module compile cache at startup
+# (module.enableCompileCache), which by default writes a node-compile-cache
+# directory below os.tmpdir(); exporting the private runtime TMPDIR before
+# `corepack enable` runs keeps that cache below run_root (runtime-tmp) and
+# never beside it in the caller's TMPDIR.
+export TMPDIR="$runtime_tmp"
 
 corepack enable --install-directory "$bin_root"
 node -e 'const p=require(process.argv[1]); if(p.version!=="0.1.0-rc.8") process.exit(1)' "$tools_root/node_modules/@deepseek-ai/dsh/package.json"
 export PATH="$tools_root/node_modules/.bin:$bin_root:$PATH"
 export DSH_HOME="$dsh_home"
-export TMPDIR="$runtime_tmp"
 
 # One exact flagged launcher: dsh_launch is a simple command array so a
 # backgrounded launch execs node directly (dsh_pid stays the dsh process
