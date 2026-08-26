@@ -16,8 +16,9 @@
 // Everything is synthetic: the fixture builders below are the verified
 // synthetic inputs shared with the root runtime oracle, the vendored handlers
 // are the single authority, and no live data, network, environment secrets,
-// raw rows or SQL is touched. The seven-negative matrix (P3B) and the bundle
-// lifecycle shell (P3C) are separate phases and out of scope here.
+// raw rows or SQL is touched. The fixture builders are exported so the
+// seven-negative matrix phase (P3B) can reuse them without duplication; the
+// bundle lifecycle shell (P3C) is a separate phase and out of scope here.
 
 import { createToolDefinitions, KaleidoSphereRuntime } from '../../lib/runtime.mjs'
 import { capabilityAttestationV2 } from '../../vendor/kaleidosphere-v0.16.0/services/bi-agent/src/external-api-v2.mjs'
@@ -292,6 +293,28 @@ function detailsProjectionInputFor(engine, {
   return { engine, scope, scopeSha256, inventorySnapshotSha256, coverageLedger: ledger, receipt, objectKey, ...extra }
 }
 
+// Oversized-evidence and resealed-ledger helpers shared with the root runtime
+// oracle's P2B3B negative cases: a raw coverage entry with caller-supplied
+// evidence refs and a resealed ledger carrying exactly that entry.
+function detailsRawEntry({ engine = ENGINE, relationName = 'sales_orders', schemaName = DETAILS_SCOPES[engine].schemas[0], evidenceRefs } = {}) {
+  const objectRef = {
+    kind: 'RELATION', schemaName, relationName, columnName: null, objectName: null,
+    sourceObjectSha256: detailsSourceObjectSha256(engine, relationName),
+  }
+  return {
+    objectKey: identitySha256(objectRef), objectRef, state: 'COMPLETE', reasonCode: null,
+    sourceQueryId: `${engine}.structure-relations`,
+    evidenceRefs: evidenceRefs ?? [...new Set([detailsSnapshotSha256(engine), detailsPreflightLedgerSha256(engine), detailsSourceObjectSha256(engine, relationName)])].sort(),
+    absenceClaim: 'NOT_CLAIMED',
+  }
+}
+
+function detailsLedgerWithEntry(ledger, entry) {
+  const { coverageSha256: _old, ...body } = structuredClone(ledger)
+  body.entries = [entry]
+  return detailsSeal(body, 'coverageSha256')
+}
+
 function detailsBindingsOf(projection) {
   return {
     engine: projection.engine,
@@ -506,6 +529,7 @@ export async function runLocalSurfaceProbe() {
 }
 
 export {
+  DETAILS_STATES,
   P3A_ALIASES,
   P3A_AUTHORITY,
   P3A_CLAIMS,
@@ -518,4 +542,14 @@ export {
   P3A_OVERVIEW_RESULT_KEYS,
   P3A_RESPONSE_KEYS,
   P3A_RESULT_KEYS,
+  deepFreezeValue,
+  detailsLedgerFor,
+  detailsLedgerWithEntry,
+  detailsProjectionInputFor,
+  detailsRawEntry,
+  detailsReceiptFor,
+  syntheticDetailsScenario,
+  syntheticOverviewScenario,
+  syntheticSearchFixture,
+  validSearchHandlerInput,
 }
