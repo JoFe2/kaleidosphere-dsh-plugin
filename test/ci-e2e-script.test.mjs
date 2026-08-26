@@ -50,7 +50,7 @@ test('rc.8 E2E scripts use the pinned root dependency and bounded process waits'
   assert.match(probe, /completeHostSchemaDigest/, 'complete schema-record digest evidence missing')
   assert.match(probe, /function expectedSurfaceReady\(catalog\)/, 'CI-safe sibling-bundle readiness gate missing')
   assert.match(probe, /observed\.some\(name => !expected\.has\(name\)\)/, 'readiness gate must pass unexpected names through to fail-closed validation')
-  assert.match(probe, /if \(!expectedSurfaceReady\(catalog\)\) return/, 'boot must retry only the incomplete expected host surface')
+  assert.equal((probe.match(/if \(!expectedSurfaceReady\(catalog\)\) return/g) ?? []).length, 2, 'boot and HMR reload must both retry only the incomplete expected host surface')
   assert.match(probe, /FORBIDDEN_MAPPED_EXPOSURE/, 'mapped schema exposure denylist missing')
   assert.match(probe, /if \(typeof value === 'string'\)/, 'denylist must inspect every schema-record string')
   assert.match(probe, /hostSchemaNames/, 'host schema-name evidence binding missing')

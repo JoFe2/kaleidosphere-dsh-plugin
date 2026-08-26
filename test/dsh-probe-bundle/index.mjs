@@ -186,6 +186,7 @@ export function apply(ctx) {
       } else if (phase === 'await-reload') {
         if (!existsSync(process.env.KS_PROBE_RELOAD_REQUEST)) return
         const catalog = schemaCatalog(ctx)
+        if (!expectedSurfaceReady(catalog)) return
         const hostSchemaNames = available(catalog)
         if (hostSchemaNames.length !== names.length) return
         const status = await ctx.tools.execute({ signal, callId: 'ks-probe-reloaded', name: 'kaleidosphere_status', arguments: {} })
