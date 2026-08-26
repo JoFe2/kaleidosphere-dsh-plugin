@@ -2931,3 +2931,182 @@ test('P2B5C1: vendor trees retain exact pinned provenance and stay outside the a
   assert.deepEqual([...rangePaths].sort(), [...manifestClosure].sort(),
     'the net vendor range must equal the manifest v0.24 closure exactly')
 })
+
+// P2B5C2: compact footprint-confinement oracle. Read-only git plumbing
+// (diff / rev-parse / log / show / status) over the reachable baseline
+// 414b40b..HEAD must prove that the net additive production footprint is
+// confined to the two approved lib mapping files (purely additive: 172/0 and
+// 129/0), plus exactly the 3 test support paths, the 5 pin support paths and
+// the manifest-derived 16 v0.24 vendor additions — nothing else, no renames,
+// no duplicates, no out-of-set paths — and that the same predicate fails
+// closed when the v0.24 vendor closure is absent from the range (the baseline
+// state). Anchors (baseline commit, manifest closure file list, fail-closed
+// git helper shape) are reused from P2B5C1; C1's vendor-pin semantics (digest
+// verification, real verifier) are not re-proven here, and no rollback
+// simulation is performed. Test-only: no lib, vendor or production file is
+// written.
+test('P2B5C2: the additive production footprint is confined to the two approved lib mapping files plus test/pin support and the pinned v0.24 vendor additions', async () => {
+  const packageRoot = path.resolve(import.meta.dirname, '..')
+  const manifest = JSON.parse(await readFile(path.join(packageRoot, 'VENDORED_MANIFEST.json'), 'utf8'))
+  const closure = manifest.v0240
+  assert.ok(closure && Array.isArray(closure.files),
+    'VENDORED_MANIFEST.json must carry the v0240 closure section with per-file entries (anchor reused from P2B5C1)')
+  assert.equal(closure.fileCount, 16, 'the v0240 section must record exactly 16 files')
+  assert.equal(closure.files.length, 16, 'the v0240 section must carry exactly 16 per-file entries')
+
+  // Reachable baseline anchor (same as P2B5C1) and the source-derived allowed
+  // footprint: 2 lib mapping files, 3 test support paths, 5 pin support paths
+  // and the manifest-derived 16 v0.24 vendor additions. P2B5C1's test lives in
+  // the same existing test/runtime.test.mjs path, so it adds no extra path.
+  const BASELINE_COMMIT = '414b40b4c63a880ddd80c2a8c872ba3bd8002eaa'
+  const LIB_FOOTPRINT = new Map([
+    ['lib/capability-manifest.mjs', { added: 172, deleted: 0 }],
+    ['lib/runtime.mjs', { added: 129, deleted: 0 }],
+  ])
+  const TEST_SUPPORT = [
+    'test/capability-manifest.test.mjs',
+    'test/runtime.test.mjs',
+    'test/vendor-v0240-closure.test.mjs',
+  ]
+  const PIN_SUPPORT = [
+    'THIRD_PARTY_MANIFEST.json',
+    'VENDORED_MANIFEST.json',
+    'package.json',
+    'scripts/verify-package.mjs',
+    'scripts/verify-vendor.mjs',
+  ]
+  const VENDOR_ADDITIONS = closure.files.map((entry) => entry.vendorPath)
+  const ADDITIONS = new Set([...VENDOR_ADDITIONS, 'test/vendor-v0240-closure.test.mjs'])
+  const ALLOWED = new Set([...LIB_FOOTPRINT.keys(), ...TEST_SUPPORT, ...PIN_SUPPORT, ...VENDOR_ADDITIONS])
+
+  // Read-only git plumbing only; fail closed (never skip) if the git binary
+  // or a ref is unavailable.
+  function git(...args) {
+    try {
+      return { status: 0, output: execFileSync('git', args, { encoding: 'utf8', cwd: packageRoot }) }
+    } catch (error) {
+      return { status: typeof error.status === 'number' ? error.status : 1, output: `${error.stdout ?? ''}${error.stderr ?? ''}${error.code ?? ''}` }
+    }
+  }
+
+  // Whole-tree range facts: canonical name-status (no renames, no duplicates)
+  // plus the lib numstat.
+  function rangeFootprint(base, head) {
+    const nameStatus = git('diff', '--name-status', '--no-renames', `${base}..${head}`)
+    assert.equal(nameStatus.status, 0, `range ${base}..${head} name-status must resolve`)
+    const lines = nameStatus.output.trim() ? nameStatus.output.trim().split('\n') : []
+    const statuses = new Map()
+    for (const line of lines) {
+      const fields = line.split('\t')
+      assert.equal(fields.length, 2, `range name-status line must be STATUS<TAB>PATH, got: ${line}`)
+      const [status, target] = fields
+      assert.ok(!status.startsWith('R'), `range entry ${target} must not be a rename, got ${status}`)
+      assert.ok(!statuses.has(target), `range entry ${target} must not be duplicated`)
+      statuses.set(target, status)
+    }
+    const numstat = git('diff', '--numstat', '--no-renames', `${base}..${head}`, '--', 'lib/')
+    assert.equal(numstat.status, 0, `range ${base}..${head} lib numstat must resolve`)
+    const libNumstat = new Map()
+    for (const line of (numstat.output.trim() ? numstat.output.trim().split('\n') : [])) {
+      const [added, deleted, target] = line.split('\t')
+      assert.ok(!Number.isNaN(Number(added)) && !Number.isNaN(Number(deleted)),
+        `lib numstat line must be numeric (not binary), got: ${line}`)
+      assert.ok(!libNumstat.has(target), `lib numstat path ${target} must not be duplicated`)
+      libNumstat.set(target, { added: Number(added), deleted: Number(deleted) })
+    }
+    return { statuses, libNumstat }
+  }
+
+  // The confinement predicate: exact whole-tree path set, exact per-path
+  // status (pure addition vs modification) and exact purely additive lib
+  // numstat. Returns the violation list (empty = confined).
+  function confinementViolations(footprint) {
+    const violations = []
+    for (const [target, status] of footprint.statuses) {
+      if (!ALLOWED.has(target)) violations.push(`out-of-set path ${target}`)
+      else if (status !== (ADDITIONS.has(target) ? 'A' : 'M')) violations.push(`path ${target} must be a pure ${ADDITIONS.has(target) ? 'addition' : 'modification'}, got ${status}`)
+    }
+    for (const target of ALLOWED) {
+      if (!footprint.statuses.has(target)) violations.push(`missing path ${target}`)
+    }
+    for (const [target, expected] of LIB_FOOTPRINT) {
+      const actual = footprint.libNumstat.get(target)
+      if (!actual) violations.push(`missing lib numstat for ${target}`)
+      else if (actual.added !== expected.added || actual.deleted !== 0) violations.push(`lib ${target} numstat ${actual.added}/${actual.deleted} is not the exact purely additive ${expected.added}/0`)
+    }
+    for (const target of footprint.libNumstat.keys()) {
+      if (!LIB_FOOTPRINT.has(target)) violations.push(`unexpected lib path ${target} in the range`)
+    }
+    return violations
+  }
+
+  // -- ANCHORS: the baseline is reachable and HEAD resolves (fail closed).
+  const rev = git('rev-parse', '--verify', `${BASELINE_COMMIT}^{commit}`)
+  assert.equal(rev.status, 0,
+    `baseline ${BASELINE_COMMIT} must be a reachable commit (git unavailable or ref missing — failing closed)`)
+  assert.equal(rev.output.trim(), BASELINE_COMMIT)
+  const head = git('rev-parse', 'HEAD')
+  assert.equal(head.status, 0, 'HEAD must resolve to a commit (not a git checkout — failing closed)')
+
+  // -- P2B5C2-SET + LIB + SUPPORT: the whole additive range is exactly the
+  // -- allowed footprint (26 paths), and the lib change is exactly the two
+  // -- purely additive numstat entries.
+  const footprint = rangeFootprint(BASELINE_COMMIT, 'HEAD')
+  assert.deepEqual([...footprint.statuses.keys()].sort(), [...ALLOWED].sort(),
+    'the whole-range path set must equal exactly the 26 allowed paths (2 lib + 3 test support + 5 pin support + 16 vendor additions)')
+  assert.deepEqual(confinementViolations(footprint), [],
+    'the additive range must be confined to the allowed footprint with exact statuses and purely additive lib numstat')
+  assert.deepEqual([...footprint.statuses.keys()].filter((t) => t.startsWith('test/')).sort(), [...TEST_SUPPORT].sort(),
+    'the test support paths must be exactly the 3 allowed paths')
+  assert.deepEqual([...footprint.statuses.keys()].filter((t) => !t.startsWith('test/') && !t.startsWith('lib/') && !t.startsWith('vendor/')).sort(), [...PIN_SUPPORT].sort(),
+    'the pin support paths must be exactly the 5 allowed paths')
+  assert.deepEqual([...footprint.statuses.keys()].filter((t) => t.startsWith(`${closure.root}/`)).sort(), [...VENDOR_ADDITIONS].sort(),
+    'the vendor range paths must equal exactly the manifest-derived 16 v0.24 additions')
+  assert.deepEqual([...footprint.libNumstat].sort((a, b) => a[0].localeCompare(b[0])),
+    [...LIB_FOOTPRINT].sort((a, b) => a[0].localeCompare(b[0])),
+    'the lib numstat must be exactly the two purely additive 172/0 and 129/0 entries')
+
+  // -- P2B5C2-RED CONTROL: with the v0.24 vendor closure absent from the range
+  // -- (the baseline state, BASELINE..BASELINE), the same predicate must fail
+  // -- closed with the closure-absent signature: no path touched at all, no lib
+  // -- numstat, and all 16 vendor additions plus both lib files reported missing.
+  const absent = rangeFootprint(BASELINE_COMMIT, BASELINE_COMMIT)
+  assert.equal(absent.statuses.size, 0, 'the closure-absent range must touch no path')
+  assert.equal(absent.libNumstat.size, 0, 'the closure-absent range must carry no lib numstat')
+  const absentViolations = confinementViolations(absent)
+  assert.ok(absentViolations.length > 0, 'the footprint proof must fail when the v0.24 vendor closure is absent from the range')
+  assert.equal(absentViolations.filter((v) => v.startsWith('missing path vendor/')).length, 16,
+    'the closure-absent signature must report all 16 v0.24 vendor additions missing')
+  assert.equal(absentViolations.filter((v) => v.startsWith('missing lib numstat')).length, 2,
+    'the closure-absent signature must report both lib mapping files missing from the numstat')
+
+  // -- P2B5C2-NO-PRODUCTION: this leaf's own change is confined to
+  // -- test/runtime.test.mjs. Post-commit runs: the leaf commit, located by its
+  // -- subject marker, touches exactly that one path. Pre-commit (this leaf's
+  // -- own gate): the uncommitted delta is exactly that one modified path
+  // -- carrying the P2B5C2 marker. The committed range facts above are the
+  // -- primary proof; uncommitted status is never the sole proof.
+  const leafLog = git('log', '--fixed-strings', '--format=%H', '--grep=#65 P2B5C2')
+  assert.equal(leafLog.status, 0, 'the leaf commit lookup must resolve')
+  const leafCommits = leafLog.output.trim() ? leafLog.output.trim().split('\n') : []
+  if (leafCommits.length > 0) {
+    const leafShow = git('show', '--name-status', '--format=', leafCommits[0])
+    assert.equal(leafShow.status, 0, 'the leaf commit must resolve')
+    const leafEntries = leafShow.output.trim().split('\n').filter(Boolean).map((line) => line.split('\t'))
+    assert.deepEqual(leafEntries, [['M', 'test/runtime.test.mjs']],
+      'the committed leaf change must touch exactly test/runtime.test.mjs and nothing else')
+  } else {
+    const status = git('status', '--porcelain')
+    assert.equal(status.status, 0, 'the working tree status must resolve')
+    const trimmedTrailing = status.output.replace(/\n+$/, '')
+    const lines = trimmedTrailing === '' ? [] : trimmedTrailing.split('\n')
+    assert.equal(lines.length, 1, 'pre-commit the uncommitted delta must be a single path')
+    const [xy, pendingPath] = [lines[0].slice(0, 2), lines[0].slice(3)]
+    assert.ok(xy.includes('M') && !xy.includes('?') && !xy.includes('D'),
+      `pre-commit the delta must be a modification (got "${lines[0]}")`)
+    assert.equal(pendingPath, 'test/runtime.test.mjs', 'pre-commit the delta must be exactly test/runtime.test.mjs')
+    const pendingDiff = git('diff', 'HEAD', '--', 'test/runtime.test.mjs')
+    assert.equal(pendingDiff.status, 0, 'the pending test diff must resolve')
+    assert.ok(pendingDiff.output.includes('P2B5C2'), 'the pending change must carry the P2B5C2 marker (this leaf\'s change)')
+  }
+})
