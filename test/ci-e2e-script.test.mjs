@@ -125,9 +125,22 @@ test('NR-1 lifecycle owns disposable npm/pnpm/corepack state below the fresh run
   // The private writable state is pre-created, not left to fail on first write
   // when the caller HOME is empty and read-only.
   const mkdirLine = source.split('\n').find(line => line.startsWith('mkdir -p "$bin_root"'))
-  for (const fragment of ['"$npm_cache"', '"$pnpm_home"', '"$xdg_cache/pnpm"', '"$xdg_state/pnpm"', '"$xdg_config/pnpm"', '"$corepack_home"']) {
+  for (const fragment of ['"$npm_cache"', '"$pnpm_home"', '"$xdg_cache/pnpm"', '"$xdg_state/pnpm"', '"$xdg_config/pnpm"', '"$corepack_home"', '"$runtime_tmp"']) {
     assert.ok(mkdirLine !== undefined && mkdirLine.includes(fragment), `NR-1: writable state dir ${fragment} must be pre-created below run_root`)
   }
+  // N1: the corepack shim enables Node's module compile cache at startup
+  // (module.enableCompileCache), which defaults to a node-compile-cache
+  // directory below os.tmpdir() ($TMPDIR). The private runtime TMPDIR must
+  // therefore be established below run_root and exported before `corepack
+  // enable` runs, so that cache lands below run_root and never beside it in
+  // the caller's TMPDIR.
+  assert.match(source, /runtime_tmp="\$run_root\/runtime-tmp"/, 'NR-1 N1: runtime TMPDIR must be below the fresh run_root')
+  const n1Lines = source.split('\n')
+  const tmpdirExportLine = n1Lines.findIndex(line => line === 'export TMPDIR="$runtime_tmp"')
+  const corepackEnableLine = n1Lines.findIndex(line => line === 'corepack enable --install-directory "$bin_root"')
+  assert.notEqual(tmpdirExportLine, -1, 'NR-1 N1: private TMPDIR export missing')
+  assert.notEqual(corepackEnableLine, -1, 'NR-1 N1: corepack enable missing')
+  assert.ok(tmpdirExportLine < corepackEnableLine, 'NR-1 N1: private TMPDIR must be exported before corepack enable so the Node compile cache lands below run_root, not beside it')
   // Only the required subprocess env is exported, and each export routes the
   // writable state into its private run_root path.
   assert.match(source, /export npm_config_cache="\$npm_cache"/, 'NR-1: npm cache must be routed below run_root')
