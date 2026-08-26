@@ -60,6 +60,12 @@ export KS_PROBE_FAILURE="$evidence_dir/failure.json"
 export KS_PROBE_DISPOSED="$evidence_dir/disposed.txt"
 export KS_PROBE_MODE=hmr
 expected_fixture_digests="${DSH_EXPECTED_FIXTURE_DIGESTS:-$repo_root/test/expected-fixture-digests.json}"
+fixture_digest_snapshot() {
+  sha256sum "$repo_root/test/expected-fixture-digests.json" "$repo_root/test/expected-fixture-digests-preview.1.json"
+}
+fixture_digest_snapshot >"$evidence_dir/fixture-digests-before.json"
+export KS_PROBE_LOCAL_SURFACE="$evidence_dir/local-surface.json"
+export KS_PROBE_NEGATIVE_MATRIX="$evidence_dir/negative-matrix.json"
 
 dsh --profile "$profile_name" >"$evidence_dir/dsh.log" 2>&1 &
 dsh_pid=$!
@@ -77,6 +83,8 @@ wait_for_file() {
 }
 
 wait_for_file "$KS_PROBE_ACTIVE"
+wait_for_file "$KS_PROBE_LOCAL_SURFACE"
+wait_for_file "$KS_PROBE_NEGATIVE_MATRIX"
 node - <<'NODE' "$KS_PROBE_ACTIVE" "$expected_fixture_digests"
 const active = require(process.argv[2])
 const expected = require(process.argv[3])
@@ -105,6 +113,21 @@ for (const result of active.results) {
 const analyze = active.results.find(result => result.name === 'kaleidosphere_analyze')
 if (analyze?.value?.response?.result?.evidence?.snapshotSha256 !== '293a896156d8f6269c4ad33e8d632da653ea180d35a4ea5f390b0be52ce3e44a') process.exit(1)
 NODE
+node - <<'NODE' "$KS_PROBE_LOCAL_SURFACE" "$KS_PROBE_NEGATIVE_MATRIX"
+const local = require(process.argv[2])
+const matrix = require(process.argv[3])
+const expectedTools = [
+  'kaleidosphere_analyze', 'kaleidosphere_discovery', 'kaleidosphere_plan',
+  'kaleidosphere_preview', 'kaleidosphere_readback', 'kaleidosphere_status',
+]
+if (local.engine !== 'mssql' || local.actions.length !== 3) process.exit(1)
+if (JSON.stringify(local.hostSurface.toolNames) !== JSON.stringify(expectedTools)) process.exit(1)
+if (local.hostSurface.capabilities.some(x => ['search', 'details', 'overview'].includes(x.action))) process.exit(1)
+if (matrix.engine !== 'mssql' || matrix.classes.length !== 7 || matrix.cases.length !== 16) process.exit(1)
+if (!matrix.cases.every(x => x.code.startsWith('KS_') || x.code.startsWith('DB_') || x.code === 'AbortError')) process.exit(1)
+NODE
+fixture_digest_snapshot >"$evidence_dir/fixture-digests-after.json"
+cmp "$evidence_dir/fixture-digests-before.json" "$evidence_dir/fixture-digests-after.json"
 [[ "$(find "$runtime_tmp" -maxdepth 1 -type d -name 'kaleidosphere-dsh-*' | wc -l)" -eq 1 ]]
 
 printf '%s\n' '- id: kaleidosphere-dsh-plugin' '  disabled: true' >"$profile_dir/cordis.patch.yml"
@@ -185,6 +208,7 @@ node -e 'const p=require(process.argv[1]); if(Object.keys(p.dependencies||{}).le
 
 external_ready="$run_root/external.url"
 external_log="$evidence_dir/external-stub-requests.jsonl"
+# bounded external stub: loopback-only and request-log bounded below
 node "$repo_root/scripts/ks-external-stub.mjs" --ready "$external_ready" --log "$external_log" \
   >"$evidence_dir/external-stub.stdout.log" 2>"$evidence_dir/external-stub.stderr.log" &
 external_pid=$!
@@ -220,7 +244,7 @@ unset dsh_pid KS_PROBE_EXPECTED_TOOL_NAMES
 node -e 'const x=require(process.argv[1]); if(x.tools.length!==1||x.results.length!==1||x.results[0].value?.response?.result?.status!=="EXTERNAL_STUB_READY") process.exit(1)' "$KS_PROBE_ACTIVE"
 [[ -f "$KS_PROBE_DISPOSED" ]]
 [[ "$(find "$runtime_tmp" -maxdepth 1 -type d -name 'kaleidosphere-dsh-*' | wc -l)" -eq 0 ]]
-node -e 'const fs=require("fs");const x=fs.readFileSync(process.argv[1],"utf8").trim().split("\n").map(JSON.parse);if(x.length!==2||x[0].path!=="/v2/capabilities"||x[1].path!=="/v2/intents"||x[1].action!=="status")process.exit(1)' "$external_log"
+node -e 'const fs=require("fs");const x=fs.readFileSync(process.argv[1],"utf8").trim().split("\n").map(JSON.parse);if(x.length!==2||x[0].path!=="/v2/capabilities"||x[1].path!=="/v2/intents"||x[1].action!=="status"||x.some(r=>r.path.includes("/v1/")||r.action&&r.action!=="status"))process.exit(1)' "$external_log"
 kill -TERM "$external_pid"
 wait "$external_pid"
 unset external_pid
@@ -244,6 +268,7 @@ const summary = {
   removal: 'PASS', reinstall: reinstall.results.length === 6 ? 'PASS' : 'FAIL', invalidConfig: 'PASS',
   intentExposure: advanced ? '5_OF_6_REAL_HOST_PASS' : 'NOT_EXPECTED_FOR_ARTIFACT',
   externalBinding: advanced ? 'ATTESTED_LOOPBACK_V2_PASS' : 'NOT_EXPECTED_FOR_ARTIFACT',
+  externalNonClaim: advanced ? 'P3C-EXTERNAL-LOCAL-ONLY' : 'NOT_EXPECTED_FOR_ARTIFACT',
   residue: 'ZERO',
 }
 fs.writeFileSync(path.join(dir, 'summary.json'), `${JSON.stringify(summary, null, 2)}\n`)
