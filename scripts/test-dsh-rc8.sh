@@ -18,8 +18,37 @@ advanced_features="${DSH_EXPECT_ADVANCED_FEATURES:-1}"
 file_timeout_steps="${DSH_FILE_TIMEOUT_STEPS:-1200}"
 profile_name=ks-e2e
 profile_dir="$dsh_home/profiles/$profile_name"
-mkdir -p "$bin_root" "$dsh_home" "$runtime_tmp" "$evidence_dir"
+# NR-1: own disposable package-manager state below the fresh run_root: every
+# byte npm/pnpm/corepack writes during the lifecycle lands in these private
+# paths (created by the mkdir below, deleted by the cleanup trap), so a
+# constrained caller HOME — e.g. an empty read-only directory — stays
+# untouched and no cache/home/store state leaks into the repository, the
+# caller HOME or any persistent global directory.
+npm_cache="$run_root/npm-cache"
+pnpm_home="$run_root/pnpm-home"
+xdg_cache="$run_root/xdg-cache"
+xdg_state="$run_root/xdg-state"
+xdg_config="$run_root/xdg-config"
+corepack_home="$run_root/corepack"
+mkdir -p "$bin_root" "$dsh_home" "$runtime_tmp" "$evidence_dir" "$npm_cache" "$pnpm_home" "$xdg_cache/pnpm" "$xdg_state/pnpm" "$xdg_config/pnpm" "$corepack_home"
 export KS_PROBE_RUN_ID="$run_id"
+# Constrained offline mode: seed the private state from a pre-provisioned
+# read-only state root (layout: pnpm/, pnpm-cache/, corepack/, pnpm-state/,
+# pnpm-config/) and resolve dependencies offline only. Without this hook the
+# lifecycle keeps its existing behavior, still writing only below run_root.
+if [[ -n "${DSH_PREPROVISIONED_STATE:-}" ]]; then
+  state_root="$DSH_PREPROVISIONED_STATE"
+  [[ -d "$state_root" ]] || { echo 'DSH_PREPROVISIONED_STATE must be a pre-provisioned state root directory' >&2; exit 2; }
+  for state_part in pnpm pnpm-cache corepack pnpm-state pnpm-config; do
+    [[ -d "$state_root/$state_part" ]] || { echo "DSH_PREPROVISIONED_STATE/$state_part is missing; pre-provisioned state root is incomplete" >&2; exit 2; }
+  done
+  cp -a "$state_root/pnpm/." "$pnpm_home/"
+  cp -a "$state_root/pnpm-cache/." "$xdg_cache/pnpm/"
+  cp -a "$state_root/corepack/." "$corepack_home/"
+  cp -a "$state_root/pnpm-state/." "$xdg_state/pnpm/"
+  cp -a "$state_root/pnpm-config/." "$xdg_config/pnpm/"
+  export npm_config_offline=true
+fi
 [[ "$advanced_features" = 0 || "$advanced_features" = 1 ]]
 
 cleanup() {
@@ -40,6 +69,16 @@ wait_for_pid() {
   fi
   wait "$pid"
 }
+
+# Route npm/pnpm/corepack writable state below run_root (NR-1): exported for
+# every lifecycle subprocess (npm pack, the corepack shim and the pnpm
+# forwarder) so the constrained caller HOME stays untouched.
+export npm_config_cache="$npm_cache"
+export PNPM_HOME="$pnpm_home"
+export XDG_CACHE_HOME="$xdg_cache"
+export XDG_STATE_HOME="$xdg_state"
+export XDG_CONFIG_HOME="$xdg_config"
+export COREPACK_HOME="$corepack_home"
 
 corepack enable --install-directory "$bin_root"
 node -e 'const p=require(process.argv[1]); if(p.version!=="0.1.0-rc.8") process.exit(1)' "$tools_root/node_modules/@deepseek-ai/dsh/package.json"

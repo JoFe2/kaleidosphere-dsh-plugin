@@ -107,3 +107,43 @@ test('PF-1 every lifecycle DSH launch uses the exact flagged rc.8 launcher contr
   const launches = lines.filter(line => /^(if[ \t]+)?"\$\{dsh_launch\[\@\]\}"[ \t]/.test(line))
   assert.equal(launches.length, 21, 'every lifecycle DSH launch must use the single flagged launcher')
 })
+
+test('NR-1 lifecycle owns disposable npm/pnpm/corepack state below the fresh run_root', async () => {
+  const source = await readFile(new URL('../scripts/test-dsh-rc8.sh', import.meta.url), 'utf8')
+  // Every package-manager writable path is derived from the fresh run_root so
+  // the existing cleanup trap deletes every byte the lifecycle creates.
+  for (const [name, dir] of Object.entries({
+    npm_cache: 'npm-cache',
+    pnpm_home: 'pnpm-home',
+    xdg_cache: 'xdg-cache',
+    xdg_state: 'xdg-state',
+    xdg_config: 'xdg-config',
+    corepack_home: 'corepack',
+  })) {
+    assert.match(source, new RegExp(`${name}="\\$run_root/${dir}"`), `NR-1: ${name} must be created below the fresh run_root`)
+  }
+  // The private writable state is pre-created, not left to fail on first write
+  // when the caller HOME is empty and read-only.
+  const mkdirLine = source.split('\n').find(line => line.startsWith('mkdir -p "$bin_root"'))
+  for (const fragment of ['"$npm_cache"', '"$pnpm_home"', '"$xdg_cache/pnpm"', '"$xdg_state/pnpm"', '"$xdg_config/pnpm"', '"$corepack_home"']) {
+    assert.ok(mkdirLine !== undefined && mkdirLine.includes(fragment), `NR-1: writable state dir ${fragment} must be pre-created below run_root`)
+  }
+  // Only the required subprocess env is exported, and each export routes the
+  // writable state into its private run_root path.
+  assert.match(source, /export npm_config_cache="\$npm_cache"/, 'NR-1: npm cache must be routed below run_root')
+  assert.match(source, /export PNPM_HOME="\$pnpm_home"/, 'NR-1: pnpm home/store must be routed below run_root')
+  assert.match(source, /export XDG_CACHE_HOME="\$xdg_cache"/, 'NR-1: pnpm metadata cache must be routed below run_root')
+  assert.match(source, /export XDG_STATE_HOME="\$xdg_state"/, 'NR-1: pnpm state must be routed below run_root')
+  assert.match(source, /export XDG_CONFIG_HOME="\$xdg_config"/, 'NR-1: pnpm config must be routed below run_root')
+  assert.match(source, /export COREPACK_HOME="\$corepack_home"/, 'NR-1: corepack home must be routed below run_root')
+  // No package-manager writable state may point at the caller HOME or a
+  // persistent global directory.
+  assert.doesNotMatch(source, /export (npm_config_cache|PNPM_HOME|XDG_[A-Z_]+HOME|COREPACK_HOME)=\$HOME/, 'NR-1: package-manager state must not be routed to caller HOME')
+  // Constrained offline mode: a fail-closed pre-provisioned state root seeds
+  // the private state and the lifecycle resolves dependencies offline only.
+  assert.match(source, /DSH_PREPROVISIONED_STATE/, 'NR-1: pre-provisioned state root hook missing')
+  assert.match(source, /\[\[ -d "\$state_root" \]\]/, 'NR-1: pre-provisioned state root must fail closed')
+  assert.match(source, /cp -a "\$state_root\/pnpm\/\." "\$pnpm_home\/"/, 'NR-1: pnpm store seed must stay below run_root')
+  assert.match(source, /cp -a "\$state_root\/corepack\/\." "\$corepack_home\/"/, 'NR-1: corepack home seed must stay below run_root')
+  assert.match(source, /export npm_config_offline=true/, 'NR-1: constrained lifecycle must resolve dependencies offline only')
+})
