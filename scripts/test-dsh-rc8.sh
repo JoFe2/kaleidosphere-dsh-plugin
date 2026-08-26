@@ -394,7 +394,16 @@ unset dsh_pid KS_PROBE_EXPECTED_TOOL_NAMES
 node -e 'const x=require(process.argv[1]); if(x.tools.length!==1||x.results.length!==1||x.results[0].value?.response?.result?.status!=="EXTERNAL_STUB_READY") process.exit(1)' "$KS_PROBE_ACTIVE"
 [[ -f "$KS_PROBE_DISPOSED" ]]
 [[ "$(find "$runtime_tmp" -maxdepth 1 -type d -name 'kaleidosphere-dsh-*' | wc -l)" -eq 0 ]]
-node -e 'const fs=require("fs");const x=fs.readFileSync(process.argv[1],"utf8").trim().split("\n").map(JSON.parse);if(x.length!==2||x[0].path!=="/v2/capabilities"||x[1].path!=="/v2/intents"||x[1].action!=="status"||x.some(r=>r.path.includes("/v1/")||r.action&&r.action!=="status"))process.exit(1)' "$external_log"
+node - "$external_log" <<'NODE'
+const fs = require('fs')
+const rows = fs.readFileSync(process.argv[2], 'utf8').trim().split('\n').filter(Boolean).map(JSON.parse)
+const allowed = row =>
+  (row.method === 'GET' && row.path === '/v2/capabilities' && row.action === null) ||
+  (row.method === 'POST' && row.path === '/v2/intents' && row.action === 'status')
+const capabilities = rows.findIndex(row => row.path === '/v2/capabilities')
+const status = rows.findIndex(row => row.path === '/v2/intents' && row.action === 'status')
+if (rows.length < 2 || !rows.every(allowed) || capabilities < 0 || status <= capabilities) process.exit(1)
+NODE
 kill -TERM "$external_pid"
 wait "$external_pid"
 unset external_pid
