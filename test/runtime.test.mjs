@@ -2933,8 +2933,9 @@ test('P2B5C1: vendor trees retain exact pinned provenance and stay outside the a
 })
 
 // P2B5C2: compact footprint-confinement oracle. Read-only git plumbing
-// (diff / rev-parse / log / show / status) over the reachable baseline
-// 414b40b..HEAD must prove that the net additive production footprint is
+// (diff / rev-parse / log / show / status) over the reachable frozen P2B
+// mapping range 414b40b..021ca294 must prove that the net additive production
+// footprint is
 // confined to the two approved lib mapping files (purely additive: 172/0 and
 // 129/0), plus exactly the 3 test support paths, the 5 pin support paths and
 // the manifest-derived 16 v0.24 vendor additions — nothing else, no renames,
@@ -2959,6 +2960,10 @@ test('P2B5C2: the additive production footprint is confined to the two approved 
   // and the manifest-derived 16 v0.24 vendor additions. P2B5C1's test lives in
   // the same existing test/runtime.test.mjs path, so it adds no extra path.
   const BASELINE_COMMIT = '414b40b4c63a880ddd80c2a8c872ba3bd8002eaa'
+  // Frozen P2B integration head: this historical additive P2 mapping range ends
+  // exactly at the verified P2B head — not at every future descendant to HEAD —
+  // so later authorized test-only P3 commits cannot invalidate the proof.
+  const P2B_HEAD = '021ca294ca79046a6b0c259df43ab5fcd3d0fe4f'
   const LIB_FOOTPRINT = new Map([
     ['lib/capability-manifest.mjs', { added: 172, deleted: 0 }],
     ['lib/runtime.mjs', { added: 129, deleted: 0 }],
@@ -3040,18 +3045,21 @@ test('P2B5C2: the additive production footprint is confined to the two approved 
     return violations
   }
 
-  // -- ANCHORS: the baseline is reachable and HEAD resolves (fail closed).
+  // -- ANCHORS: the baseline and the frozen P2B head are both reachable and
+  // -- exact (fail closed).
   const rev = git('rev-parse', '--verify', `${BASELINE_COMMIT}^{commit}`)
   assert.equal(rev.status, 0,
     `baseline ${BASELINE_COMMIT} must be a reachable commit (git unavailable or ref missing — failing closed)`)
   assert.equal(rev.output.trim(), BASELINE_COMMIT)
-  const head = git('rev-parse', 'HEAD')
-  assert.equal(head.status, 0, 'HEAD must resolve to a commit (not a git checkout — failing closed)')
+  const p2bHead = git('rev-parse', '--verify', `${P2B_HEAD}^{commit}`)
+  assert.equal(p2bHead.status, 0,
+    `frozen P2B head ${P2B_HEAD} must be a reachable commit (git unavailable or ref missing — failing closed)`)
+  assert.equal(p2bHead.output.trim(), P2B_HEAD)
 
   // -- P2B5C2-SET + LIB + SUPPORT: the whole additive range is exactly the
   // -- allowed footprint (26 paths), and the lib change is exactly the two
   // -- purely additive numstat entries.
-  const footprint = rangeFootprint(BASELINE_COMMIT, 'HEAD')
+  const footprint = rangeFootprint(BASELINE_COMMIT, P2B_HEAD)
   assert.deepEqual([...footprint.statuses.keys()].sort(), [...ALLOWED].sort(),
     'the whole-range path set must equal exactly the 26 allowed paths (2 lib + 3 test support + 5 pin support + 16 vendor additions)')
   assert.deepEqual(confinementViolations(footprint), [],
