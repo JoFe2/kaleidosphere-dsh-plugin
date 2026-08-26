@@ -21,6 +21,7 @@
     "NOTICE",
     "VENDORED_MANIFEST.json",
     "THIRD_PARTY_MANIFEST.json",
+    "scripts/verify-vendor.mjs",
     "third_party",
     "examples"
   ],
