@@ -2524,3 +2524,214 @@ test('P2B5A: the integrated sealed outputs and exposed metadata carry no authori
     await runtime.dispose()
   }
 })
+
+// P2B5B: compact v0.16 regression oracle. With all three additive local
+// v0.24.0 mappings (Search/Details/Overview, source commit e092bb0) present
+// and locally dispatchable, it proves exactly the six pinned v0.16 intents
+// and six native tools remain byte-for-byte/pin-for-pin represented and
+// executable, and the representative v0.16 runtime success/denial behavior
+// and provenance remain unchanged. The pins are literals independent of the
+// tables under test (the v0.16-era response/evidence digest table is the
+// committed expected-fixture-digests.json); the three v0.24 mappings are
+// proven present through the P2B5A-verified fixtures and absent from the
+// native tool surface and the EXTERNAL transport. This oracle does not
+// duplicate the P2B5A authority proof or absorb P2B5C rollback
+// responsibility. Test only: no production or vendor file is added or
+// modified.
+const P2B5B_INTENTS = Object.freeze(['status', 'discovery', 'analyze', 'plan', 'preview', 'readback'])
+const P2B5B_TOOL_NAMES = Object.freeze([
+  'kaleidosphere_status',
+  'kaleidosphere_discovery',
+  'kaleidosphere_analyze',
+  'kaleidosphere_plan',
+  'kaleidosphere_preview',
+  'kaleidosphere_readback',
+])
+const P2B5B_CAPABILITIES = Object.freeze([
+  { action: 'status', capabilityId: 'bi.status.read', authority: 'read-only' },
+  { action: 'discovery', capabilityId: 'bi.discovery.run', authority: 'local-evidence-write' },
+  { action: 'analyze', capabilityId: 'bi.analysis.run', authority: 'source-read-only' },
+  { action: 'plan', capabilityId: 'bi.graph.adaptive-v1.plan', authority: 'proposal-only' },
+  { action: 'preview', capabilityId: 'bi.preview.create', authority: 'proposal-only' },
+  { action: 'readback', capabilityId: 'bi.readback.read', authority: 'read-only' },
+])
+const P2B5B_DESCRIPTIONS = Object.freeze({
+  status: 'Read KaleidoSphere plugin readiness, configured source mode, engine, and latest receipt identity.',
+  discovery: 'Run or continue a guided, receipt-bound KaleidoSphere database discovery session.',
+  analyze: 'Analyze the configured database metadata through the configured KaleidoSphere read-only runtime.',
+  plan: 'Create an evidence-bound KaleidoSphere analysis plan without persistent mutation authority.',
+  preview: 'Create an evidence-bound proposal preview from the latest KaleidoSphere analysis receipt.',
+  readback: 'Read back the latest KaleidoSphere receipt, catalog summary, and technical coverage counts.',
+})
+const P2B5B_PARAMETERS = Object.freeze({
+  status: {},
+  analyze: {},
+  readback: {},
+  discovery: {
+    command: { type: 'string', required: true, enum: ['start', 'resume', 'status', 'answer', 'revise', 'confirm', 'export'] },
+    sessionId: { type: 'string', required: true, description: 'Stable lowercase discovery session id.' },
+    field: { type: 'string', description: 'Field name for answer or revise.' },
+    value: { type: 'json', description: 'JSON value for answer or revise.' },
+  },
+  plan: {
+    objective: { type: 'string', required: true, description: 'Business analysis objective.' },
+    receiptId: { type: 'string', description: 'Optional exact latest receipt id.' },
+  },
+  preview: {
+    objective: { type: 'string', required: true, description: 'Business analysis objective.' },
+    receiptId: { type: 'string', description: 'Optional exact latest receipt id.' },
+  },
+})
+const P2B5B_TIMEOUTS = Object.freeze({ status: 30_000, discovery: 30_000, analyze: 180_000, plan: 30_000, preview: 30_000, readback: 30_000 })
+const P2B5B_OUTPUT_SCHEMA = Object.freeze({
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    response: { type: 'object', additionalProperties: true, required: true },
+    evidence: { type: 'object', additionalProperties: true, required: true },
+  },
+})
+// v0.16-era provenance pin: the exact event and receipt identities for the
+// six representative intent executions (deterministic in fixture mode).
+const P2B5B_PROVENANCE = Object.freeze({
+  status: { eventId: 'ks-event-status-cfd38e0dc01a', receiptId: 'ks-status-4749a27fa59ecfd38e0dc01a' },
+  analyze: { eventId: 'ks-event-analyze-5997a2bd2c96', receiptId: 'ks-analyze-5536317306925997a2bd2c96' },
+  discovery: { eventId: 'ks-event-discovery-100a9fb6ce64', receiptId: 'ks-discovery-56f65c082345100a9fb6ce64' },
+  plan: { eventId: 'ks-event-plan-2dc63bb0fc1f', receiptId: 'ks-plan-efe8e523f1712dc63bb0fc1f' },
+  preview: { eventId: 'ks-event-preview-b3a44e23c77c', receiptId: 'ks-preview-27228dff832bb3a44e23c77c' },
+  readback: { eventId: 'ks-event-readback-79b590696831', receiptId: 'ks-readback-de6cac970d7579b590696831' },
+})
+
+test('P2B5B: with the three additive v0.24 local mappings present, the six pinned v0.16 intents and native tools remain byte-for-byte/pin-for-pin represented, executable and green with unchanged runtime behavior and provenance', async () => {
+  const values = p2b5aRepresentativeValues()
+  const runtime = await KaleidoSphereRuntime.create({ source: { mode: 'fixture' } })
+  try {
+    // Presence precondition: all three additive local v0.24 mappings
+    // dispatch locally on this same runtime (P2B5A-verified fixtures).
+    for (const { action } of P2B5A_LOCAL_CAPABILITIES) {
+      const out = await runtime.execute(action, values[action])
+      assert.equal(out.response.schemaVersion, SEARCH_RESULT_SCHEMA)
+      assert.equal(out.response.action, action)
+    }
+    // P2B5B-SIX: exactly the six pinned v0.16 intents and native tool names,
+    // pinned against literals independent of the tables under test.
+    assert.deepEqual(CLOSED_INTENTS, P2B5B_INTENTS)
+    assert.deepEqual(TOOL_NAMES, Object.fromEntries(P2B5B_INTENTS.map((action, index) => [action, P2B5B_TOOL_NAMES[index]])))
+    const tools = createToolDefinitions(runtime)
+    assert.equal(tools.length, 6)
+    assert.deepEqual(tools.map(tool => tool.name), P2B5B_TOOL_NAMES)
+    // Byte-for-byte representation: the full per-tool data surface is the
+    // pinned v0.16 surface, and no v0.24 capability is exposed natively.
+    tools.forEach((tool, index) => {
+      const { action, capabilityId, authority } = P2B5B_CAPABILITIES[index]
+      assert.deepEqual(
+        {
+          name: tool.name,
+          description: tool.description,
+          parameters: tool.parameters,
+          timeoutMs: tool.timeoutMs,
+          capability: tool.capability,
+          output: tool.output.schema,
+        },
+        {
+          name: P2B5B_TOOL_NAMES[index],
+          description: P2B5B_DESCRIPTIONS[action],
+          parameters: P2B5B_PARAMETERS[action],
+          timeoutMs: P2B5B_TIMEOUTS[action],
+          capability: { action, capabilityId, authority },
+          output: P2B5B_OUTPUT_SCHEMA,
+        },
+      )
+      assert(!P2B5A_LOCAL_CAPABILITIES.some(cap =>
+        tool.capability.action === cap.action || tool.capability.capabilityId === cap.capabilityId))
+    })
+    // P2B5B-RUNTIME: all six remain executable with the v0.16-era
+    // representative inputs; the exact response/evidence digests remain the
+    // v0.16-era pins and the provenance fields are unchanged.
+    const outputs = {
+      status: await runtime.execute('status'),
+      analyze: await runtime.execute('analyze'),
+      discovery: await runtime.execute('discovery', { command: 'start', sessionId: 'demo-1' }),
+      plan: await runtime.execute('plan', { objective: 'Review weekly order value' }),
+      preview: await runtime.execute('preview', { objective: 'Preview weekly order value' }),
+      readback: await runtime.execute('readback'),
+    }
+    for (const [action, out] of Object.entries(outputs)) {
+      assert.equal(out.response.action, action)
+      assert.equal(out.response.integrity.digest, expectedDigests[action].response)
+      assert.equal(out.evidence.evidenceDigest, expectedDigests[action].evidence)
+      assert.equal(out.evidence.status, 'succeeded')
+      assert.equal(out.evidence.resultIntegrityDigest, out.response.integrity.digest)
+      assert.equal(out.evidence.bridgeSchemaVersion, 'kaleidosphere/external-intent-evidence-bridge/v1')
+      assert.equal(out.evidence.eventId, P2B5B_PROVENANCE[action].eventId)
+      assert.equal(out.evidence.receiptId, P2B5B_PROVENANCE[action].receiptId)
+      assert.equal(out.evidence.capabilityId, P2B5B_CAPABILITIES[P2B5B_INTENTS.indexOf(action)].capabilityId)
+    }
+    // Representative v0.16 denial behavior remains unchanged.
+    const denied = await KaleidoSphereRuntime.create()
+    try {
+      await assert.rejects(denied.execute('readback'), { code: 'KS_DSH_ANALYSIS_REQUIRED' })
+      await assert.rejects(denied.execute('plan', { objective: 'Review weekly order value' }), { code: 'KS_DSH_ANALYSIS_REQUIRED' })
+      await assert.rejects(denied.execute('query'), { code: 'KS_DSH_ACTION_INVALID' })
+    } finally {
+      await denied.dispose()
+    }
+  } finally {
+    await runtime.dispose()
+  }
+  // Absent from the EXTERNAL transport while the v0.16 intents still ride the
+  // shared /v2/intents API: one loopback server proves the three v0.24
+  // mappings deny locally before the wire and the representative v0.16
+  // external success keeps its pinned attested flow.
+  const requests = []
+  const server = createServer((request, response) => {
+    const chunks = []
+    request.on('data', chunk => chunks.push(chunk))
+    request.on('end', async () => {
+      try {
+        requests.push({ method: request.method, url: request.url })
+        let value
+        if (request.method === 'GET' && request.url === '/v2/capabilities') {
+          value = capabilityAttestationV2()
+        } else if (request.method === 'POST' && request.url === '/v2/intents') {
+          value = await executeExternalIntentV2(JSON.parse(Buffer.concat(chunks).toString('utf8')), {
+            status: () => ({ status: 'EXTERNAL_READY', sourceMode: 'fixture', engine: 'mssql' }),
+          })
+        } else {
+          response.writeHead(404).end()
+          return
+        }
+        response.writeHead(200, { 'content-type': 'application/json' })
+        response.end(JSON.stringify(value))
+      } catch (error) {
+        response.writeHead(500, { 'content-type': 'application/json' })
+        response.end(JSON.stringify({ error: error.message }))
+      }
+    })
+  })
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
+  const address = server.address()
+  assert(address && typeof address !== 'string')
+  const external = await KaleidoSphereRuntime.create({
+    runtimeMode: 'external',
+    external: { baseUrl: `http://127.0.0.1:${address.port}` },
+  })
+  try {
+    for (const { action, externalDenied } of P2B5A_LOCAL_CAPABILITIES) {
+      await assert.rejects(external.execute(action, values[action]),
+        { code: externalDenied, message: externalDenied })
+    }
+    const externalStatus = await external.execute('status')
+    assert.equal(externalStatus.response.result.status, 'EXTERNAL_READY')
+    assert.equal(externalStatus.evidence.status, 'succeeded')
+    // Only the create-time attestation fetch and the one v0.16 intent POST
+    // touched the wire; none of the three v0.24 mappings ever reached it.
+    assert.deepEqual(requests, [
+      { method: 'GET', url: '/v2/capabilities' },
+      { method: 'POST', url: '/v2/intents' },
+    ])
+  } finally {
+    await external.dispose()
+    await new Promise(resolve => server.close(resolve))
+  }
+})
