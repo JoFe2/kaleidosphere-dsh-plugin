@@ -286,7 +286,7 @@ if (typeof status !== 'string' || status.length === 0) process.exit(1)
 NODE
 wait_for_pid "$dsh_pid" "$process_wait_seconds" dsh
 unset dsh_pid
-[[ -f "$KS_PROBE_DISPOSED" ]]
+wait_for_file "$KS_PROBE_DISPOSED"
 [[ "$(find "$runtime_tmp" -maxdepth 1 -type d -name 'kaleidosphere-dsh-*' | wc -l)" -eq 0 ]]
 
 "${dsh_launch[@]}" plugin --profile "$profile_name" remove kaleidosphere-dsh-plugin >"$evidence_dir/remove.log" 2>&1
@@ -307,7 +307,7 @@ wait_for_file "$KS_PROBE_ACTIVE"
 assert_run_bound_json "$KS_PROBE_ACTIVE"
 wait_for_pid "$dsh_pid" "$process_wait_seconds" dsh
 unset dsh_pid
-[[ -f "$KS_PROBE_DISPOSED" ]]
+wait_for_file "$KS_PROBE_DISPOSED"
 [[ "$(find "$runtime_tmp" -maxdepth 1 -type d -name 'kaleidosphere-dsh-*' | wc -l)" -eq 0 ]]
 export KS_PROBE_RESIDUE=ZERO
 
@@ -350,7 +350,7 @@ assert_run_bound_json "$KS_PROBE_ACTIVE"
 wait_for_pid "$dsh_pid" "$process_wait_seconds" dsh
 unset dsh_pid KS_PROBE_EXPECTED_TOOL_NAMES
 node -e 'const x=require(process.argv[1]); if(x.tools.length!==5||x.tools.includes("kaleidosphere_preview")||x.results.length!==0) process.exit(1)' "$KS_PROBE_ACTIVE"
-[[ -f "$KS_PROBE_DISPOSED" ]]
+wait_for_file "$KS_PROBE_DISPOSED"
 [[ "$(find "$runtime_tmp" -maxdepth 1 -type d -name 'kaleidosphere-dsh-*' | wc -l)" -eq 0 ]]
 "${dsh_launch[@]}" plugin --profile "$toggled_profile" remove kaleidosphere-dsh-plugin kaleidosphere-dsh-probe >"$evidence_dir/remove-toggled.log" 2>&1
 node -e 'const p=require(process.argv[1]); if(Object.keys(p.dependencies||{}).length||p.dsh.profile.bundles.some(x=>/kaleidosphere/.test(x))) process.exit(1)' "$toggled_profile_dir/package.json"
@@ -392,7 +392,7 @@ assert_run_bound_json "$KS_PROBE_ACTIVE"
 wait_for_pid "$dsh_pid" "$process_wait_seconds" dsh
 unset dsh_pid KS_PROBE_EXPECTED_TOOL_NAMES
 node -e 'const x=require(process.argv[1]); if(x.tools.length!==1||x.results.length!==1||x.results[0].value?.response?.result?.status!=="EXTERNAL_STUB_READY") process.exit(1)' "$KS_PROBE_ACTIVE"
-[[ -f "$KS_PROBE_DISPOSED" ]]
+wait_for_file "$KS_PROBE_DISPOSED"
 [[ "$(find "$runtime_tmp" -maxdepth 1 -type d -name 'kaleidosphere-dsh-*' | wc -l)" -eq 0 ]]
 node - "$external_log" <<'NODE'
 const fs = require('fs')
